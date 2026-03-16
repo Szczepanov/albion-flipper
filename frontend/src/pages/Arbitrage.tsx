@@ -160,6 +160,9 @@ export default function Arbitrage() {
               let vol24h = 0;
               let vol7d = 0;
               let vol4w = 0;
+              
+              let oldVolume = 0;
+              let oldPriceSum = 0;
 
               cityHistory.forEach(hData => {
                 if (hData.data && Array.isArray(hData.data)) {
@@ -169,9 +172,17 @@ export default function Arbitrage() {
                     if (diffDays <= 1.5) vol24h += point.item_count;
                     if (diffDays <= 7.5) vol7d += point.item_count;
                     if (diffDays <= 28.5) vol4w += point.item_count;
+                    
+                    // Grab historical average price from 3-4 weeks ago (days 21 to 28)
+                    if (diffDays >= 21 && diffDays <= 28.5) {
+                      oldVolume += point.item_count;
+                      oldPriceSum += (point.avg_price * point.item_count);
+                    }
                   });
                 }
               });
+              
+              const avgPrice4w = oldVolume > 0 ? Math.round(oldPriceSum / oldVolume) : null;
 
               // Find the best sell order (lowest) and best buy order (highest) regardless of quality
               // For a flipper, they usually buy the cheapest available to fulfill a buy order, or buy cheap to sell high
@@ -227,6 +238,13 @@ export default function Arbitrage() {
                   </div>
 
                   <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-light)' }}>
+                    <div className="flex justify-between items-center mb-2">
+                      <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Avg Price (~4w ago)</span>
+                      <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.875rem' }}>
+                        {avgPrice4w ? `${avgPrice4w.toLocaleString()} 🥈` : 'No Data'}
+                      </span>
+                    </div>
+                  
                     <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Sales Volume</div>
                     <div className="flex justify-between" style={{ fontSize: '0.875rem' }}>
                       <div className="flex-col items-center">

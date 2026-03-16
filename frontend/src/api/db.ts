@@ -1,5 +1,5 @@
-import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { PriceData, HistoryData } from './albion';
+import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { type PriceData, type HistoryData } from './albion';
 
 interface AlbionDB extends DBSchema {
   prices: {

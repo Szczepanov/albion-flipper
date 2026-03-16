@@ -30,7 +30,6 @@ export interface HistoryData {
   data: HistoryDataPoint[];
 }
 
-const DEFAULT_CITIES = ['Martlock', 'Thetford', 'Fort Sterling', 'Lymhurst', 'Bridgewatch', 'Caerleon'];
 
 export const fetchPrices = async (items: string[], locations: string[] = []): Promise<PriceData[]> => {
   if (!items.length) return [];
