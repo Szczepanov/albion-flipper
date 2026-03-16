@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { fetchPrices, type PriceData } from '../api/albion';
+import { useSearchParams } from 'react-router-dom';
+import { fetchPrices, fetchHistory, type PriceData, type HistoryData } from '../api/albion';
 import { RefreshCcw, Search } from 'lucide-react';
 
 interface ItemEntry {
@@ -10,31 +11,61 @@ interface ItemEntry {
 const CITIES = ['Martlock', 'Thetford', 'Fort Sterling', 'Lymhurst', 'Bridgewatch', 'Caerleon'];
 
 export default function Arbitrage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [itemsList, setItemsList] = useState<ItemEntry[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedItem, setSelectedItem] = useState<ItemEntry | null>(null);
   
   const [prices, setPrices] = useState<PriceData[]>([]);
+  const [history, setHistory] = useState<HistoryData[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     // Load local items database
+    let isSubscribed = true;
     fetch('/data/items_min.json')
       .then((res) => res.json())
-      .then((data) => setItemsList(data))
+      .then((data: ItemEntry[]) => {
+        if (!isSubscribed) return;
+        setItemsList(data);
+        
+        // Load initial state from URL query parameter
+        const queryItem = searchParams.get('item');
+        if (queryItem) {
+          const found = data.find(i => i.id === queryItem);
+          if (found) {
+            setSelectedItem(found);
+            setSearchTerm(found.name);
+            triggerSearch(found); // automatically fetch if directly linked
+          }
+        }
+      })
       .catch((err) => console.error('Error loading items:', err));
+      
+      return () => { isSubscribed = false; };
   }, []);
+
+  const triggerSearch = async (item: ItemEntry) => {
+    setLoading(true);
+    const [priceData, historyData] = await Promise.all([
+      fetchPrices([item.id], CITIES),
+      fetchHistory([item.id], CITIES)
+    ]);
+    // Sort so cheapest sell orders are at the top
+    priceData.sort((a, b) => a.sell_price_min - b.sell_price_min);
+    setPrices(priceData);
+    setHistory(historyData);
+    setLoading(false);
+  };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedItem) return;
     
-    setLoading(true);
-    const data = await fetchPrices([selectedItem.id], CITIES);
-    // Sort so cheapest sell orders are at the top
-    data.sort((a, b) => a.sell_price_min - b.sell_price_min);
-    setPrices(data);
-    setLoading(false);
+    // Update URL
+    setSearchParams({ item: selectedItem.id });
+    
+    await triggerSearch(selectedItem);
   };
 
   const filteredItems = searchTerm.length > 2 
@@ -103,7 +134,7 @@ export default function Arbitrage() {
           {selectedItem && (
             <button 
               type="button" 
-              onClick={() => { setSelectedItem(null); setSearchTerm(''); setPrices([]); }}
+              onClick={() => { setSelectedItem(null); setSearchTerm(''); setPrices([]); setHistory([]); setSearchParams({}); }}
               style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)' }}
             >
               Clear
@@ -121,6 +152,26 @@ export default function Arbitrage() {
               // Group prices by city
               const cityPrices = prices.filter(p => p.city === city);
               if (cityPrices.length === 0) return null;
+
+              const cityHistory = history.filter(h => h.location === city);
+              const now = new Date().getTime();
+              const dayMs = 24 * 60 * 60 * 1000;
+              
+              let vol24h = 0;
+              let vol7d = 0;
+              let vol4w = 0;
+
+              cityHistory.forEach(hData => {
+                if (hData.data && Array.isArray(hData.data)) {
+                  hData.data.forEach(point => {
+                    const ptTime = new Date(point.timestamp).getTime();
+                    const diffDays = (now - ptTime) / dayMs;
+                    if (diffDays <= 1.5) vol24h += point.item_count;
+                    if (diffDays <= 7.5) vol7d += point.item_count;
+                    if (diffDays <= 28.5) vol4w += point.item_count;
+                  });
+                }
+              });
 
               // Find the best sell order (lowest) and best buy order (highest) regardless of quality
               // For a flipper, they usually buy the cheapest available to fulfill a buy order, or buy cheap to sell high
@@ -172,6 +223,24 @@ export default function Arbitrage() {
                           Q{bestBuy.quality} • {formatTimeAgo(bestBuy.buy_price_max_date)}
                         </div>
                       )}
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-light)' }}>
+                    <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Sales Volume</div>
+                    <div className="flex justify-between" style={{ fontSize: '0.875rem' }}>
+                      <div className="flex-col items-center">
+                        <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{vol24h.toLocaleString()}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>24h</span>
+                      </div>
+                      <div className="flex-col items-center">
+                        <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{vol7d.toLocaleString()}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>7d</span>
+                      </div>
+                      <div className="flex-col items-center">
+                        <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{vol4w.toLocaleString()}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>4w</span>
+                      </div>
                     </div>
                   </div>
                 </div>
