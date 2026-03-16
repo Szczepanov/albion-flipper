@@ -45,6 +45,10 @@ interface TradeOpportunity {
   destCity: string;
   buyAtPrice: number;
   sellAtPrice: number;
+  estimatedActualPrice: number;
+  destBestBuy: number | null;
+  destBestSell: number | null;
+  actualPriceModel: 'buy-side' | 'mid-spread' | 'history-clamped' | 'sell-side';
   grossProfit: number;
   roi: number;
   jumps: number;
@@ -57,6 +61,45 @@ interface TradeOpportunity {
   totalInvestment: number;
   totalProfit: number;
 }
+
+const estimateActualTradingPrice = (
+  bestBuy: number | null,
+  bestSell: number | null,
+  recentAvg: number | null
+): { price: number | null; model: TradeOpportunity['actualPriceModel'] } => {
+  if (!bestBuy && !bestSell) return { price: null, model: 'mid-spread' };
+  if (bestBuy && !bestSell) return { price: bestBuy, model: 'buy-side' };
+  if (!bestBuy && bestSell) return { price: bestSell, model: 'sell-side' };
+
+  const buy = bestBuy!;
+  const sell = bestSell!;
+  const spread = sell - buy;
+  const spreadPct = spread > 0 ? spread / Math.max(buy, 1) : 0;
+
+  if (recentAvg !== null && recentAvg > 0) {
+    const clampedToBook = Math.max(buy, Math.min(sell, recentAvg));
+
+    // If history sits very close to best buy while spread is wide, assume mostly buy-order fills.
+    const closeToBuy = Math.abs(clampedToBook - buy) / Math.max(buy, 1) <= 0.05;
+    if (spreadPct >= 0.2 && closeToBuy) {
+      return { price: buy, model: 'buy-side' };
+    }
+
+    // If history is close to best sell and spread is tight, treat as sell-side execution.
+    const closeToSell = Math.abs(sell - clampedToBook) / Math.max(sell, 1) <= 0.03;
+    if (spreadPct <= 0.08 && closeToSell) {
+      return { price: sell, model: 'sell-side' };
+    }
+
+    return { price: Math.round(clampedToBook), model: 'history-clamped' };
+  }
+
+  // Fallback without recent history: use conservative mid-spread for very wide books, else slightly below ask.
+  if (spreadPct >= 0.2) {
+    return { price: Math.round((buy + sell) / 2), model: 'mid-spread' };
+  }
+  return { price: Math.max(buy, sell - 1), model: 'sell-side' };
+};
 
 export default function Scanner() {
   const [baseCity, setBaseCity] = useState('Lymhurst');
@@ -197,12 +240,82 @@ export default function Scanner() {
         for (const destCity of CITIES) {
           if (destCity === baseCity) continue;
 
-          // We will use the lowest sell order minus 1 to simulate undercutting, assuming volume is high enough to execute.
-          const destPrices = itemPrices.filter(p => p.city === destCity && p.sell_price_min > 0 && isReasonable(p.sell_price_min));
-          if (destPrices.length === 0) continue;
+          const destSellPrices = itemPrices.filter(p => p.city === destCity && p.sell_price_min > 0 && isReasonable(p.sell_price_min));
+          const destBuyPrices = itemPrices.filter(p => p.city === destCity && p.buy_price_max > 0 && isReasonable(p.buy_price_max));
+          if (destSellPrices.length === 0 && destBuyPrices.length === 0) continue;
 
-          // We assume we buy at source and sell at dest via Sell Orders (undercutting by 1)
-          const bestDestPrice = Math.min(...destPrices.map(p => p.sell_price_min)) - 1;
+          const bestDestSell = destSellPrices.length > 0 ? Math.min(...destSellPrices.map(p => p.sell_price_min)) : null;
+          const bestDestBuy = destBuyPrices.length > 0 ? Math.max(...destBuyPrices.map(p => p.buy_price_max)) : null;
+
+          // Check volume and build recent/day history before estimating actual execution price.
+          const destHist = itemHist.filter(h => h.location === destCity);
+          let v24 = 0;
+          let v7d = 0;
+          let ov = 0;
+          let ops = 0;
+          let recentAvgPrice: number | null = null;
+          if (destHist.length > 0) {
+            // The API returns an array of history blocks, one per Quality.
+            // We must aggregate counts across ALL qualities for the same day.
+            const dailyTotals = new Map<string, { count: number; value: number }>();
+
+            destHist.forEach(h => {
+              if (h.data) {
+                h.data.forEach(pt => {
+                  // Extract just the YYYY-MM-DD part to group by day safely
+                  const dayKey = pt.timestamp.split('T')[0];
+                  const existing = dailyTotals.get(dayKey) || { count: 0, value: 0 };
+                  existing.count += pt.item_count;
+                  existing.value += (pt.avg_price * pt.item_count);
+                  dailyTotals.set(dayKey, existing);
+                });
+              }
+            });
+
+            // Convert to array and sort by most recent day first
+            const sortedDays = Array.from(dailyTotals.entries())
+              .map(([dateStr, totals]) => ({
+                dateStr,
+                timestamp: new Date(dateStr).getTime(),
+                item_count: totals.count,
+                avg_price: totals.count > 0 ? totals.value / totals.count : 0
+              }))
+              .sort((a, b) => b.timestamp - a.timestamp);
+
+            if (sortedDays.length > 0) {
+              const mostRecent = sortedDays[0];
+              const diffdLatest = (now - mostRecent.timestamp) / dayMs;
+
+              // If the most recent data is older than 10 days, it's a dead market
+              if (diffdLatest <= 10) {
+                v24 = mostRecent.item_count;
+
+                // Avg the top 7 available consecutive records we have for "7d"
+                const top7 = sortedDays.slice(0, 7);
+                v7d = Math.round(top7.reduce((sum, pt) => sum + pt.item_count, 0) / top7.length);
+
+                // Use up to last 3 active days as the "recent actual traded price"
+                const top3 = sortedDays.slice(0, 3);
+                const top3Vol = top3.reduce((sum, pt) => sum + pt.item_count, 0);
+                recentAvgPrice = top3Vol > 0
+                  ? top3.reduce((sum, pt) => sum + (pt.avg_price * pt.item_count), 0) / top3Vol
+                  : null;
+
+                // 4w moving average (points ~21-28 days ago)
+                sortedDays.forEach(pt => {
+                  const diffd = (now - pt.timestamp) / dayMs;
+                  if (diffd >= 21 && diffd <= 28.5) {
+                    ov += pt.item_count;
+                    ops += (pt.avg_price * pt.item_count);
+                  }
+                });
+              }
+            }
+          }
+
+          const estimatedActual = estimateActualTradingPrice(bestDestBuy, bestDestSell, recentAvgPrice);
+          if (estimatedActual.price === null) continue;
+          const bestDestPrice = estimatedActual.price;
 
           const buyFee = Math.ceil(bestSourcePrice * 0.025);
           const sellFee = Math.ceil(bestDestPrice * 0.025);
@@ -217,64 +330,6 @@ export default function Scanner() {
           const roi = (grossProfit / totalCostPerItem) * 100;
 
           if (roi >= minProfit) {
-            // Check volume
-            const destHist = itemHist.filter(h => h.location === destCity);
-            let v24 = 0;
-            let v7d = 0;
-            let ov = 0;
-            let ops = 0;
-            if (destHist.length > 0) {
-              // The API returns an array of history blocks, one per Quality.
-              // We must aggregate counts across ALL qualities for the same day.
-              const dailyTotals = new Map<string, { count: number; value: number }>();
-
-              destHist.forEach(h => {
-                if (h.data) {
-                  h.data.forEach(pt => {
-                    // Extract just the YYYY-MM-DD part to group by day safely
-                    const dayKey = pt.timestamp.split('T')[0];
-                    const existing = dailyTotals.get(dayKey) || { count: 0, value: 0 };
-                    existing.count += pt.item_count;
-                    existing.value += (pt.avg_price * pt.item_count);
-                    dailyTotals.set(dayKey, existing);
-                  });
-                }
-              });
-
-              // Convert to array and sort by most recent day first
-              const sortedDays = Array.from(dailyTotals.entries())
-                .map(([dateStr, totals]) => ({
-                  dateStr,
-                  timestamp: new Date(dateStr).getTime(),
-                  item_count: totals.count,
-                  avg_price: totals.count > 0 ? totals.value / totals.count : 0
-                }))
-                .sort((a, b) => b.timestamp - a.timestamp);
-
-              if (sortedDays.length > 0) {
-                const mostRecent = sortedDays[0];
-                const diffdLatest = (now - mostRecent.timestamp) / dayMs;
-                
-                // If the most recent data is older than 10 days, it's a dead market
-                if (diffdLatest <= 10) {
-                  v24 = mostRecent.item_count;
-                  
-                  // Avg the top 7 available consecutive records we have for "7d"
-                  const top7 = sortedDays.slice(0, 7);
-                  v7d = Math.round(top7.reduce((sum, pt) => sum + pt.item_count, 0) / top7.length);
-                  
-                  // 4w moving average (points ~21-28 days ago)
-                  sortedDays.forEach(pt => {
-                    const diffd = (now - pt.timestamp) / dayMs;
-                    if (diffd >= 21 && diffd <= 28.5) {
-                      ov += pt.item_count;
-                      ops += (pt.avg_price * pt.item_count);
-                    }
-                  });
-                }
-              }
-            }
-
             if (v24 >= minVolume) {
               const maxQtyByBudget = budget > 0 ? Math.floor(budget / bestSourcePrice) : 9999;
               const maxQtyByVolume = Math.floor(v24 * (maxMarketShare / 100));
@@ -290,6 +345,10 @@ export default function Scanner() {
                 destCity: destCity,
                 buyAtPrice: bestSourcePrice,
                 sellAtPrice: bestDestPrice,
+                estimatedActualPrice: bestDestPrice,
+                destBestBuy: bestDestBuy,
+                destBestSell: bestDestSell,
+                actualPriceModel: estimatedActual.model,
                 grossProfit: grossProfit,
                 roi: roi,
                 jumps: jumps,
@@ -626,8 +685,11 @@ export default function Scanner() {
                           <td className="p-4 text-right">
                             <div className="font-medium text-green-400">+{opp.sellAtPrice.toLocaleString()}</div>
                             <div className="text-xs text-gray-500 mt-0.5 whitespace-nowrap">
-                              -{Math.ceil(opp.sellAtPrice * 0.025).toLocaleString()} fee,{' '}
+                              est actual ({opp.actualPriceModel}), -{Math.ceil(opp.sellAtPrice * 0.025).toLocaleString()} fee,{' '}
                               -{Math.ceil(opp.sellAtPrice * 0.04).toLocaleString()} tax
+                            </div>
+                            <div className="text-[10px] text-gray-600 mt-0.5 whitespace-nowrap">
+                              book B:{opp.destBestBuy ? opp.destBestBuy.toLocaleString() : '-'} / S:{opp.destBestSell ? opp.destBestSell.toLocaleString() : '-'}
                             </div>
                           </td>
                           <td className="p-4 text-right">
