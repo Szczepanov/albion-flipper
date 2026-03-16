@@ -1,8 +1,9 @@
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
 import Arbitrage from './pages/Arbitrage';
+import Scanner from './pages/Scanner';
 import BlackMarket from './pages/BlackMarket';
 import Crafting from './pages/Crafting';
-import { Activity, TrendingUp, Hammer } from 'lucide-react';
+import { Activity, TrendingUp, Hammer, Search } from 'lucide-react';
 import './index.css';
 
 function App() {
@@ -19,6 +20,10 @@ function App() {
               <Activity size={18} />
               Arbitrage
             </NavLink>
+            <NavLink to="/scanner" className={({isActive}: {isActive: boolean}) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Search size={18} />
+              Auto-Scanner
+            </NavLink>
             <NavLink to="/black-market" className={({isActive}: {isActive: boolean}) => `nav-link ${isActive ? 'active' : ''}`}>
               <TrendingUp size={18} />
               Black Market
@@ -33,6 +38,7 @@ function App() {
         <main className="page-content">
           <Routes>
             <Route path="/" element={<Arbitrage />} />
+            <Route path="/scanner" element={<Scanner />} />
             <Route path="/black-market" element={<BlackMarket />} />
             <Route path="/crafting" element={<Crafting />} />
           </Routes>
