@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, MapPin, Loader2, DollarSign, Package, AlertCircle } from 'lucide-react';
+import { Search, MapPin, Loader2, DollarSign, Package, AlertCircle, TrendingUp } from 'lucide-react';
 import { fetchPrices, fetchHistory } from '../api/albion';
 
 // Royal Cities only — no Caerleon (Red Zone) for safe trading
@@ -51,6 +51,7 @@ interface TradeOpportunity {
   destVol24h: number;
   destVol7d: number;
   avgPrice4w: number | null;
+  priceSpikePct: number | null;
   recommendedQty: number;   // capped by volume share
   manifestQty: number;      // final budget-allocated qty (greedy across route)
   totalInvestment: number;
@@ -195,11 +196,20 @@ export default function Scanner() {
           const destPrices = itemPrices.filter(p => p.city === destCity && p.sell_price_min > 0 && isReasonable(p.sell_price_min));
           if (destPrices.length === 0) continue;
 
+          // We assume we buy at source and sell at dest via Sell Orders (undercutting by 1)
           const bestDestPrice = Math.min(...destPrices.map(p => p.sell_price_min)) - 1;
-          const grossProfit = bestDestPrice - bestSourcePrice;
+
+          const buyFee = Math.ceil(bestSourcePrice * 0.025);
+          const sellFee = Math.ceil(bestDestPrice * 0.025);
+          const salesTax = Math.ceil(bestDestPrice * 0.04); // 4% Premium Tax
+          
+          const totalCostPerItem = bestSourcePrice + buyFee;
+          const totalRevenuePerItem = bestDestPrice - sellFee - salesTax;
+          
+          const grossProfit = totalRevenuePerItem - totalCostPerItem;
           const jumps = CITY_DISTANCES[baseCity]?.[destCity] || 0;
-          // ROI is purely gross — travel cost is a fixed trip overhead shown at route level
-          const roi = (grossProfit / bestSourcePrice) * 100;
+          // ROI is purely gross margin on invested silver (cost + buy fee)
+          const roi = (grossProfit / totalCostPerItem) * 100;
 
           if (roi >= minProfit) {
             // Check volume
@@ -208,27 +218,65 @@ export default function Scanner() {
             let v7d = 0;
             let ov = 0;
             let ops = 0;
+            if (destHist.length > 0) {
+              // The API returns an array of history blocks, one per Quality.
+              // We must aggregate counts across ALL qualities for the same day.
+              const dailyTotals = new Map<string, { count: number; value: number }>();
 
-            destHist.forEach(h => {
-              if (h.data) {
-                h.data.forEach(pt => {
-                  const ptTime = new Date(pt.timestamp).getTime();
-                  const diffd = (now - ptTime) / dayMs;
-                  if (diffd <= 2) v24 += pt.item_count;
-                  if (diffd <= 8) v7d += pt.item_count;
+              destHist.forEach(h => {
+                if (h.data) {
+                  h.data.forEach(pt => {
+                    // Extract just the YYYY-MM-DD part to group by day safely
+                    const dayKey = pt.timestamp.split('T')[0];
+                    const existing = dailyTotals.get(dayKey) || { count: 0, value: 0 };
+                    existing.count += pt.item_count;
+                    existing.value += (pt.avg_price * pt.item_count);
+                    dailyTotals.set(dayKey, existing);
+                  });
+                }
+              });
+
+              // Convert to array and sort by most recent day first
+              const sortedDays = Array.from(dailyTotals.entries())
+                .map(([dateStr, totals]) => ({
+                  dateStr,
+                  timestamp: new Date(dateStr).getTime(),
+                  item_count: totals.count,
+                  avg_price: totals.count > 0 ? totals.value / totals.count : 0
+                }))
+                .sort((a, b) => b.timestamp - a.timestamp);
+
+              if (sortedDays.length > 0) {
+                const mostRecent = sortedDays[0];
+                const diffdLatest = (now - mostRecent.timestamp) / dayMs;
+                
+                // If the most recent data is older than 10 days, it's a dead market
+                if (diffdLatest <= 10) {
+                  v24 = mostRecent.item_count;
                   
-                  if (diffd >= 21 && diffd <= 28.5) {
-                    ov += pt.item_count;
-                    ops += (pt.avg_price * pt.item_count);
-                  }
-                });
+                  // Avg the top 7 available consecutive records we have for "7d"
+                  const top7 = sortedDays.slice(0, 7);
+                  v7d = Math.round(top7.reduce((sum, pt) => sum + pt.item_count, 0) / top7.length);
+                  
+                  // 4w moving average (points ~21-28 days ago)
+                  sortedDays.forEach(pt => {
+                    const diffd = (now - pt.timestamp) / dayMs;
+                    if (diffd >= 21 && diffd <= 28.5) {
+                      ov += pt.item_count;
+                      ops += (pt.avg_price * pt.item_count);
+                    }
+                  });
+                }
               }
-            });
+            }
 
             if (v24 >= minVolume) {
               const maxQtyByBudget = budget > 0 ? Math.floor(budget / bestSourcePrice) : 9999;
               const maxQtyByVolume = Math.floor(v24 * (maxMarketShare / 100));
               const recommendedQty = Math.max(1, Math.min(maxQtyByBudget, maxQtyByVolume));
+              
+              const avg4w = ov > 0 ? Math.round(ops / ov) : null;
+              const spikePct = avg4w && avg4w > 0 ? Math.round(((bestDestPrice - avg4w) / avg4w) * 100) : null;
               
               newOpps.push({
                 itemId: item.id,
@@ -242,7 +290,8 @@ export default function Scanner() {
                 jumps: jumps,
                 destVol24h: v24,
                 destVol7d: v7d,
-                avgPrice4w: ov > 0 ? Math.round(ops / ov) : null,
+                avgPrice4w: avg4w,
+                priceSpikePct: spikePct,
                 recommendedQty: recommendedQty,
                 manifestQty: 0, // filled by greedy pass below
                 totalInvestment: 0,
@@ -264,10 +313,14 @@ export default function Scanner() {
         // Already sorted by ROI desc; allocate budget greedily
         let remaining = budget;
         group.forEach(opp => {
-          const maxCanBuy = opp.buyAtPrice > 0 ? Math.floor(remaining / opp.buyAtPrice) : 0;
+          // Compute exact cost required to buy one item (including buy order fee)
+          const buyFee = Math.ceil(opp.buyAtPrice * 0.025);
+          const totalCostPerItem = opp.buyAtPrice + buyFee;
+          
+          const maxCanBuy = totalCostPerItem > 0 ? Math.floor(remaining / totalCostPerItem) : 0;
           const mQty = Math.min(opp.recommendedQty, maxCanBuy);
           opp.manifestQty = mQty;
-          opp.totalInvestment = mQty * opp.buyAtPrice;
+          opp.totalInvestment = mQty * totalCostPerItem;
           opp.totalProfit = mQty * opp.grossProfit;
           remaining -= opp.totalInvestment;
         });
@@ -287,9 +340,19 @@ export default function Scanner() {
   // Group Opportunities by Destination City for rendering
   const groupedOpps: Record<string, TradeOpportunity[]> = {};
   opportunities.forEach(opp => {
+    if (opp.manifestQty === 0) return; // Ignore items without allocated budget
     if (!groupedOpps[opp.destCity]) groupedOpps[opp.destCity] = [];
     groupedOpps[opp.destCity].push(opp);
   });
+
+  const routeStats = Object.keys(groupedOpps).map(destCity => {
+    const items = groupedOpps[destCity];
+    const jumps = items[0]?.jumps || 0;
+    const tripMinutes = jumps * 10;
+    const totalRouteProfit = items.reduce((s, o) => s + o.totalProfit, 0);
+    const silverPerHour = tripMinutes > 0 ? Math.round(totalRouteProfit / (tripMinutes / 60)) : 0;
+    return { destCity, items, jumps, tripMinutes, totalRouteProfit, silverPerHour };
+  }).sort((a, b) => b.silverPerHour - a.silverPerHour);
 
   return (
     <div className="fade-in max-w-7xl mx-auto">
@@ -462,7 +525,9 @@ export default function Scanner() {
           )}
 
           <div className="flex flex-col gap-6">
-            {Object.keys(groupedOpps).map(destCity => (
+            {routeStats.map(({ destCity, items, jumps, tripMinutes, totalRouteProfit, silverPerHour }) => {
+              const fmtSilver = (n: number) => n >= 1_000_000 ? (n/1_000_000).toFixed(1)+'M' : n >= 1_000 ? (n/1_000).toFixed(0)+'k' : n.toString();
+              return (
               <div key={destCity} className="glass-panel fade-in overflow-hidden">
                 <div className="bg-gradient-to-r from-[rgba(255,255,255,0.05)] to-transparent p-4 border-b border-gray-800 flex justify-between items-center flex-wrap gap-4">
                   <div className="flex flex-col">
@@ -471,26 +536,16 @@ export default function Scanner() {
                       <span className="text-gray-500">➔</span>
                       <span className="text-purple-400">{destCity}</span>
                     </h3>
-                    {(() => {
-                      const items = groupedOpps[destCity];
-                      const jumps = items[0]?.jumps || 0;
-                      const tripMinutes = jumps * 10;
-                      const totalRouteProfit = items.reduce((s, o) => s + o.totalProfit, 0);
-                      const silverPerHour = tripMinutes > 0 ? Math.round(totalRouteProfit / (tripMinutes / 60)) : 0;
-                      const fmtSilver = (n: number) => n >= 1_000_000 ? (n/1_000_000).toFixed(1)+'M' : n >= 1_000 ? (n/1_000).toFixed(0)+'k' : n.toString();
-                      return (
-                        <div className="text-xs text-gray-400 mt-1 flex flex-wrap items-center gap-3">
-                          <span className="flex items-center gap-1">
-                            <MapPin size={11} />{jumps} jump{jumps !== 1 ? 's' : ''} (~{tripMinutes} min)
-                          </span>
-                          <span className="text-emerald-400 font-semibold">+{fmtSilver(totalRouteProfit)} total</span>
-                          <span className="text-yellow-400/80">{fmtSilver(silverPerHour)}/hr</span>
-                        </div>
-                      );
-                    })()}
+                    <div className="text-xs text-gray-400 mt-1 flex flex-wrap items-center gap-3">
+                      <span className="flex items-center gap-1">
+                        <MapPin size={11} />{jumps} jump{jumps !== 1 ? 's' : ''} (~{tripMinutes} min)
+                      </span>
+                      <span className="text-emerald-400 font-semibold">+{fmtSilver(totalRouteProfit)} total</span>
+                      <span className="text-yellow-400/80">{fmtSilver(silverPerHour)}/hr</span>
+                    </div>
                   </div>
                   <div className="text-sm text-gray-400 bg-black/30 px-3 py-1 rounded-full">
-                    {groupedOpps[destCity].length} viable items
+                    {items.length} viable items
                   </div>
                 </div>
 
@@ -507,7 +562,7 @@ export default function Scanner() {
                       </tr>
                     </thead>
                     <tbody>
-                      {groupedOpps[destCity].map((opp, idx) => (
+                      {items.map((opp, idx) => (
                         <tr key={idx} className="border-b border-gray-800/50 hover:bg-[rgba(255,255,255,0.02)] transition-colors">
                           <td className="p-4">
                             <div className="flex items-center gap-3">
@@ -517,9 +572,15 @@ export default function Scanner() {
                                 className="w-10 h-10 object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
                                 onError={(e) => { e.currentTarget.style.display = 'none'; }}
                               />
-                              <div>
+                              <div className="flex flex-col items-start">
                                 <div className="font-semibold text-gray-200">{opp.name}</div>
-                                <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                                {opp.priceSpikePct !== null && opp.priceSpikePct >= 20 && (
+                                  <div className="flex items-center gap-1 text-[10px] font-bold text-orange-400 bg-orange-400/10 border border-orange-400/20 px-1.5 py-0.5 rounded shadow-[0_0_8px_rgba(251,146,60,0.15)] mt-1 tracking-wide uppercase">
+                                    <TrendingUp size={10} />
+                                    Spike +{opp.priceSpikePct}% vs Avg
+                                  </div>
+                                )}
+                                <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
                                   Avg 4w: <span className="text-gray-300">{opp.avgPrice4w ? opp.avgPrice4w.toLocaleString() : '-'}</span>
                                 </div>
                               </div>
@@ -527,11 +588,16 @@ export default function Scanner() {
                           </td>
                           <td className="p-4 text-right">
                             <div className="font-medium text-red-400">-{opp.buyAtPrice.toLocaleString()}</div>
-                            <div className="text-xs text-gray-500 mt-0.5">per item</div>
+                            <div className="text-xs text-gray-500 mt-0.5 whitespace-nowrap">
+                              +{Math.ceil(opp.buyAtPrice * 0.025).toLocaleString()} buy fee
+                            </div>
                           </td>
                           <td className="p-4 text-right">
                             <div className="font-medium text-green-400">+{opp.sellAtPrice.toLocaleString()}</div>
-                            <div className="text-xs text-gray-500 mt-0.5">undercut</div>
+                            <div className="text-xs text-gray-500 mt-0.5 whitespace-nowrap">
+                              -{Math.ceil(opp.sellAtPrice * 0.025).toLocaleString()} fee,{' '}
+                              -{Math.ceil(opp.sellAtPrice * 0.04).toLocaleString()} tax
+                            </div>
                           </td>
                           <td className="p-4 text-right">
                             <div className="font-bold text-white flex flex-col items-end gap-0.5">
@@ -570,10 +636,10 @@ export default function Scanner() {
                   </table>
                 </div>
               </div>
-            ))}
+            );
+          })}
           </div>
         </div>
-        
       </div>
     </div>
   );
