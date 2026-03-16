@@ -189,12 +189,17 @@ export default function Arbitrage() {
               
               const avgPrice4w = oldVolume > 0 ? Math.round(oldPriceSum / oldVolume) : null;
 
+              const isReasonable = (price: number) => {
+                if (!avgPrice4w) return true;
+                return price <= avgPrice4w * 10;
+              };
+
               // Find the best sell order (lowest) and best buy order (highest) regardless of quality
               // For a flipper, they usually buy the cheapest available to fulfill a buy order, or buy cheap to sell high
               // A better view is to show the absolute cheapest sell, and absolute highest buy
               
-              const validSells = cityPrices.filter(p => p.sell_price_min > 0);
-              const validBuys = cityPrices.filter(p => p.buy_price_max > 0);
+              const validSells = cityPrices.filter(p => p.sell_price_min > 0 && isReasonable(p.sell_price_min));
+              const validBuys = cityPrices.filter(p => p.buy_price_max > 0 && isReasonable(p.buy_price_max));
 
               const bestSell = validSells.length > 0 ? validSells.reduce((prev, curr) => prev.sell_price_min < curr.sell_price_min ? prev : curr) : null;
               const bestBuy = validBuys.length > 0 ? validBuys.reduce((prev, curr) => prev.buy_price_max > curr.buy_price_max ? prev : curr) : null;
