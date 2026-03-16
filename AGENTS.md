@@ -11,10 +11,12 @@ The project consumes data from the community-driven Albion Online Data Project.
 
 ## Data Pipeline
 To prevent loading huge static JSON files directly into the frontend, there is an ETL pipeline step.
-1. Download the raw multi-megabyte `items.json` or `world.json` into the root directory.
+1. Download the raw multi-megabyte `items.json` and/or `world.json` into the root directory.
 2. Run `node process_data.js` in the root directory.
-3. This script extracts *only the English item names* and outputs compressed `.json` files.
-4. It automatically moves the optimized `items_min.json` and `world_min.json` into the `frontend/public/data/` folder so the UI can fetch them quickly.
+3. The script extracts reduced datasets:
+   - `items_min.json`: `{ id, name }` from `UniqueName` + `LocalizedNames["EN-US"]`
+   - `world_min.json`: `{ id, name }` from `Index` + `UniqueName` (only if `world.json` exists)
+4. Outputs are currently written to the repository root (`items_min.json`, `world_min.json`). If you refresh source data, copy/move them into `frontend/public/data/` for frontend fetches.
 
 ## API Integration & Caching
 - **Base URL**: `https://europe.albion-online-data.com/api/v2/stats/`
@@ -32,6 +34,6 @@ When building or modifying UI components, you **MUST** adhere to the following d
 
 ## Current & Upcoming Modules
 - **Arbitrage**: City-to-city sell order flips with Volume & Historical Price Trends. Supports URL sharing (`/?item=ITEM_ID`).
-- **Automated Scanner**: (Under construction) A batch processor that queries IndexedDB and the API iteratively to find the best multi-item trade routes (preventing single-item market saturation) without triggering rate limits.
+- **Automated Scanner**: Implemented (active/beta). Supports tier/category filters, budget constraints, market-share caps, and route-level manifest suggestions using batched API + IndexedDB caching.
 - **Black Market**: (Under construction) Royal City sell orders vs Caerleon Black Market buy orders.
 - **Crafting**: (Under construction) Raw material cost refinement calculator.

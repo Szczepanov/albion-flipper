@@ -1,73 +1,54 @@
-# React + TypeScript + Vite
+# Albion Flipper Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite frontend for Albion Flipper.
 
-Currently, two official plugins are available:
+## Scripts
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Run from `frontend/`:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev
+npm run build
+npm run preview
+npm run lint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## App Structure
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+- `src/App.tsx`: Router + top navigation.
+- `src/pages/Arbitrage.tsx`: Single-item city-to-city analysis.
+- `src/pages/Scanner.tsx`: Batch scanning workflow with filters and route grouping.
+- `src/pages/BlackMarket.tsx`: Placeholder (WIP).
+- `src/pages/Crafting.tsx`: Placeholder (WIP).
+- `src/api/albion.ts`: API client + batched fetching logic.
+- `src/api/db.ts`: IndexedDB cache helpers.
+- `src/index.css`: Global styles, tokens, utility classes, glassmorphism panels.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Data Files
+
+The frontend expects:
+
+- `public/data/items_min.json`
+- `public/data/world_min.json`
+
+These are generated from root-level raw dumps via `node process_data.js` (run from repository root), then copied into `frontend/public/data/`.
+
+## Runtime Data Sources
+
+- Base API: `https://europe.albion-online-data.com/api/v2/stats`
+- Prices cache TTL: 30 minutes
+- History cache TTL: 1 hour
+
+## Routing
+
+- `/`: Arbitrage
+- `/scanner`: Auto-Scanner
+- `/black-market`: Black Market (WIP)
+- `/crafting`: Crafting (WIP)
+
+## UI Conventions
+
+- Use `.glass-panel` for primary cards/containers.
+- Preserve dark theme variables from `index.css`.
+- Keep interactive transitions smooth (`transform 0.2s ease` baseline).
+- Keep styles in vanilla CSS (no Tailwind unless explicitly requested).

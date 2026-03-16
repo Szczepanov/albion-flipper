@@ -1,55 +1,78 @@
 # Albion Flipper
 
-A web application for finding profitable item flipping opportunities in Albion Online.
+Albion Flipper is a React + TypeScript web app for the **Albion Online Europe server** that helps identify profitable market opportunities.
 
-## Features
+## Current Modules
 
-- **Item Search**: Find items by name with automated Albion Online icons.
-- **Market Data**: View the best buy and sell prices for items grouped by city.
-- **Arbitrage Calculation**: Calculate potential profit margins for flipping items between cities.
-- **Volume & Trends**: View 24h, 7d, and 4w sales volume, alongside 4-week historical average prices to determine market direction.
-- **Shareable URLs**: Directly share analyzed item pages via URL parameters (e.g., `/?item=T4_BAG`).
-- **Persistent Caching**: Leverages browser IndexedDB to safely cache massive API responses (30m for prices, 1h for history), avoiding rate limits and improving speed.
+- **Arbitrage (live)**: Analyze city-to-city opportunities for a selected item, including 24h/7d/4w volume context and URL sharing (`/?item=ITEM_ID`).
+- **Auto-Scanner (active/beta)**: Batch scans many items with tier/category filters, budget limits, and market-share caps to build route-level manifests.
+- **Black Market (WIP)**: Planned Royal City vs Caerleon Black Market comparison view.
+- **Crafting (WIP)**: Planned refining/crafting profitability tools.
 
-## Getting Started
+## Stack
+
+- React, TypeScript, Vite, React Router DOM
+- Axios for API calls
+- IndexedDB (`idb`) for persistent client-side caching
+- Vanilla CSS (glassmorphism UI)
+
+## Setup
 
 ### Prerequisites
 
-- Node.js (v18 or higher)
-- npm (or yarn)
+- Node.js (modern LTS recommended)
+- npm
 
-### Installation
+### Install
 
-1. Clone the repository:
+```bash
+cd frontend
+npm install
+```
+
+### Run Dev Server
+
+```bash
+cd frontend
+npm run dev
+```
+
+Open `http://localhost:5173`.
+
+### Build / Lint
+
+```bash
+cd frontend
+npm run build
+npm run lint
+```
+
+## Data Pipeline (ETL)
+
+The frontend reads minimized data from:
+
+- `frontend/public/data/items_min.json`
+- `frontend/public/data/world_min.json`
+
+To refresh data from Albion dumps:
+
+1. Place raw `items.json` and/or `world.json` in the repository root.
+2. Run:
    ```bash
-   git clone <repository-url>
-   cd albion-flipper
+   node process_data.js
+   ```
+3. The script writes `items_min.json` and `world_min.json` to the repository root. Copy them to `frontend/public/data/`:
+   ```powershell
+   Copy-Item .\items_min.json .\frontend\public\data\items_min.json -Force
+   Copy-Item .\world_min.json .\frontend\public\data\world_min.json -Force
    ```
 
-2. Install dependencies:
-   ```bash
-   cd frontend
-   npm install
-   ```
+## API + Caching
 
-### Running the Application
-
-1. Start the development server:
-   ```bash
-   cd frontend
-   npm run dev
-   ```
-
-2. Open your browser and navigate to `http://localhost:5173`.
-
-## Data
-
-The application uses the following data files:
-
-- `items.json`: List of all items in the game.
-- `world.json`: List of all locations (cities) in the game.
-
-These files are automatically processed by `process_data.js` into `items_min.json` and `world_min.json` for faster loading.
+- API base: `https://europe.albion-online-data.com/api/v2/stats`
+- Cache TTL:
+  - Prices: 30 minutes
+  - History: 1 hour
 
 ## License
 
