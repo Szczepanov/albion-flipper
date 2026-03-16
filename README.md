@@ -4,10 +4,12 @@ A web application for finding profitable item flipping opportunities in Albion O
 
 ## Features
 
-- **Item Search**: Find items by name.
-- **Market Data**: View buy and sell prices for items in different cities.
+- **Item Search**: Find items by name with automated Albion Online icons.
+- **Market Data**: View the best buy and sell prices for items grouped by city.
 - **Arbitrage Calculation**: Calculate potential profit margins for flipping items between cities.
-- **Location Data**: View information about different cities in Albion Online.
+- **Volume & Trends**: View 24h, 7d, and 4w sales volume, alongside 4-week historical average prices to determine market direction.
+- **Shareable URLs**: Directly share analyzed item pages via URL parameters (e.g., `/?item=T4_BAG`).
+- **Persistent Caching**: Leverages browser IndexedDB to safely cache massive API responses (30m for prices, 1h for history), avoiding rate limits and improving speed.
 
 ## Getting Started
 
