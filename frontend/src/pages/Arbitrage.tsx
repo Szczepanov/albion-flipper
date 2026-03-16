@@ -113,33 +113,70 @@ export default function Arbitrage() {
       </div>
 
       {prices.length > 0 && (
-        <div className="glass-panel">
-          <h2 className="mb-4">Live Market Data for {selectedItem?.name}</h2>
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>City</th>
-                  <th>Quality</th>
-                  <th>Min Sell Price</th>
-                  <th>Max Buy Order</th>
-                  <th>Last Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {prices.map((p, idx) => (
-                  <tr key={`${p.city}-${p.quality}-${idx}`}>
-                    <td style={{ fontWeight: 600 }}>{p.city}</td>
-                    <td>{p.quality}</td>
-                    <td className="price-high">{p.sell_price_min > 0 ? p.sell_price_min.toLocaleString() + ' 🥈' : 'No Data'}</td>
-                    <td className="price-low">{p.buy_price_max > 0 ? p.buy_price_max.toLocaleString() + ' 🥈' : 'No Data'}</td>
-                    <td style={{ color: 'var(--text-muted)' }}>
-                      {new Date(p.sell_price_min_date).toLocaleTimeString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="flex-col gap-4">
+          <h2 className="mb-2">Live Market Data for {selectedItem?.name}</h2>
+          
+          <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
+            {CITIES.map(city => {
+              // Group prices by city
+              const cityPrices = prices.filter(p => p.city === city);
+              if (cityPrices.length === 0) return null;
+
+              // Find the best sell order (lowest) and best buy order (highest) regardless of quality
+              // For a flipper, they usually buy the cheapest available to fulfill a buy order, or buy cheap to sell high
+              // A better view is to show the absolute cheapest sell, and absolute highest buy
+              
+              const validSells = cityPrices.filter(p => p.sell_price_min > 0);
+              const validBuys = cityPrices.filter(p => p.buy_price_max > 0);
+
+              const bestSell = validSells.length > 0 ? validSells.reduce((prev, curr) => prev.sell_price_min < curr.sell_price_min ? prev : curr) : null;
+              const bestBuy = validBuys.length > 0 ? validBuys.reduce((prev, curr) => prev.buy_price_max > curr.buy_price_max ? prev : curr) : null;
+
+              // Format relative time helper
+              const formatTimeAgo = (dateStr: string) => {
+                const date = new Date(dateStr);
+                const diff = (new Date().getTime() - date.getTime()) / 60000; // in minutes
+                if (diff < 60) return `${Math.round(diff)}m ago`;
+                if (diff < 1440) return `${Math.round(diff / 60)}h ago`;
+                return `${Math.round(diff / 1440)}d ago`;
+              };
+
+              return (
+                <div key={city} className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.25rem' }}>
+                  <div className="flex justify-between items-center" style={{ borderBottom: '1px solid var(--border-light)', paddingBottom: '0.5rem' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{city}</h3>
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <span style={{ color: 'var(--text-muted)' }}>Min Sell</span>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="price-high" style={{ fontWeight: 'bold' }}>
+                        {bestSell ? `${bestSell.sell_price_min.toLocaleString()} 🥈` : 'No Sells'}
+                      </div>
+                      {bestSell && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          Q{bestSell.quality} • {formatTimeAgo(bestSell.sell_price_min_date)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span style={{ color: 'var(--text-muted)' }}>Max Buy</span>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="price-low" style={{ fontWeight: 'bold' }}>
+                        {bestBuy ? `${bestBuy.buy_price_max.toLocaleString()} 🥈` : 'No Buys'}
+                      </div>
+                      {bestBuy && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          Q{bestBuy.quality} • {formatTimeAgo(bestBuy.buy_price_max_date)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
