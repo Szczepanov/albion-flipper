@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fetchPrices, fetchHistory, type PriceData, type HistoryData } from '../api/albion';
-import { clearAllCache } from '../api/db';
 import { RefreshCcw, Search, RotateCw } from 'lucide-react';
 
 interface ItemEntry {
@@ -22,6 +21,7 @@ export default function Arbitrage() {
   const [loading, setLoading] = useState(false);
   const [updateCooldown, setUpdateCooldown] = useState(0); // seconds remaining
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     // Load local items database
@@ -72,23 +72,32 @@ export default function Arbitrage() {
   };
 
   const handleUpdatePrices = async () => {
-    if (!selectedItem || updateCooldown > 0 || loading) return;
-    // Clear only this item from cache then re-fetch
-    await clearAllCache(); // clearing all is fine since next fetch repopulates
-    await triggerSearch(selectedItem);
-    // Start 2-minute cooldown
-    const COOLDOWN = 120;
-    setUpdateCooldown(COOLDOWN);
-    if (cooldownRef.current) clearInterval(cooldownRef.current);
-    cooldownRef.current = setInterval(() => {
-      setUpdateCooldown(prev => {
-        if (prev <= 1) {
-          clearInterval(cooldownRef.current!);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    if (!selectedItem || updateCooldown > 0 || loading || isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      const { initDB } = await import('../api/db');
+      const db = await initDB();
+      await db.delete('prices', selectedItem.id);
+      await db.delete('history', selectedItem.id);
+      await triggerSearch(selectedItem);
+      // Start 2-minute cooldown
+      const COOLDOWN = 120;
+      setUpdateCooldown(COOLDOWN);
+      if (cooldownRef.current) clearInterval(cooldownRef.current);
+      cooldownRef.current = setInterval(() => {
+        setUpdateCooldown(prev => {
+          if (prev <= 1) {
+            clearInterval(cooldownRef.current!);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
   const filteredItems = searchTerm.length > 2 
     ? itemsList.filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, 10)
@@ -101,7 +110,7 @@ export default function Arbitrage() {
         <p>Find the best margins by comparing sell orders across Royal Cities. Buy low, transport safely, sell high.</p>
       </div>
 
-      <div className="glass-panel mb-8">
+      <div className="glass-panel mb-8" style={{ position: 'relative', zIndex: 200 }}>
         <form onSubmit={handleSearch} className="flex gap-4 items-center">
           <div className="w-full" style={{ position: 'relative' }}>
             <div className="flex items-center gap-2">
@@ -170,7 +179,7 @@ export default function Arbitrage() {
               <button
                 type="button"
                 onClick={handleUpdatePrices}
-                disabled={updateCooldown > 0 || loading}
+                disabled={updateCooldown > 0 || loading || isRefreshing}
                 title={updateCooldown > 0 ? `Available in ${updateCooldown}s` : 'Force-refresh prices from API'}
                 style={{ 
                   background: 'var(--bg-card)', 
@@ -180,7 +189,7 @@ export default function Arbitrage() {
                   opacity: updateCooldown > 0 ? 0.6 : 1
                 }}
               >
-                <RotateCw size={14} className={loading ? 'animate-spin' : ''} />
+                <RotateCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
                 {updateCooldown > 0 ? `${Math.floor(updateCooldown / 60)}:${String(updateCooldown % 60).padStart(2, '0')}` : 'Update Prices'}
               </button>
             </>
@@ -205,27 +214,56 @@ export default function Arbitrage() {
               let vol24h = 0;
               let vol7d = 0;
               let vol4w = 0;
-              
               let oldVolume = 0;
               let oldPriceSum = 0;
 
-              cityHistory.forEach(hData => {
-                if (hData.data && Array.isArray(hData.data)) {
-                  hData.data.forEach(point => {
-                    const ptTime = new Date(point.timestamp).getTime();
-                    const diffDays = (now - ptTime) / dayMs;
-                    if (diffDays <= 2) vol24h += point.item_count;
-                    if (diffDays <= 8) vol7d += point.item_count;
-                    if (diffDays <= 28.5) vol4w += point.item_count;
+              if (cityHistory.length > 0) {
+                const dailyTotals = new Map<string, { count: number; value: number }>();
+
+                cityHistory.forEach(hData => {
+                  if (hData.data && Array.isArray(hData.data)) {
+                    hData.data.forEach(point => {
+                      const dayKey = point.timestamp.split('T')[0];
+                      const existing = dailyTotals.get(dayKey) || { count: 0, value: 0 };
+                      existing.count += point.item_count;
+                      existing.value += (point.avg_price * point.item_count);
+                      dailyTotals.set(dayKey, existing);
+                    });
+                  }
+                });
+
+                const sortedDays = Array.from(dailyTotals.entries())
+                  .map(([dateStr, totals]) => ({
+                    dateStr,
+                    timestamp: new Date(dateStr).getTime(),
+                    item_count: totals.count,
+                    avg_price: totals.count > 0 ? totals.value / totals.count : 0
+                  }))
+                  .sort((a, b) => b.timestamp - a.timestamp);
+
+                if (sortedDays.length > 0) {
+                  const mostRecent = sortedDays[0];
+                  const diffdLatest = (now - mostRecent.timestamp) / dayMs;
+                  
+                  if (diffdLatest <= 10) { // Only consider recent data for 24h/7d
+                    vol24h = mostRecent.item_count;
+                    const top7 = sortedDays.slice(0, 7);
+                    vol7d = Math.round(top7.reduce((sum, pt) => sum + pt.item_count, 0) / top7.length);
                     
-                    // Grab historical average price from 3-4 weeks ago (days 21 to 28)
-                    if (diffDays >= 21 && diffDays <= 28.5) {
-                      oldVolume += point.item_count;
-                      oldPriceSum += (point.avg_price * point.item_count);
-                    }
-                  });
+                    // 4w moving average calculation
+                    sortedDays.forEach(pt => {
+                      const diffd = (now - pt.timestamp) / dayMs;
+                      if (diffd >= 21 && diffd <= 28.5) { // Roughly 3-4 weeks ago
+                        oldVolume += pt.item_count;
+                        oldPriceSum += (pt.avg_price * pt.item_count);
+                      }
+                      if (diffd <= 28.5) { // Total volume for the last 4 weeks
+                        vol4w += pt.item_count;
+                      }
+                    });
+                  }
                 }
-              });
+              }
               
               const avgPrice4w = oldVolume > 0 ? Math.round(oldPriceSum / oldVolume) : null;
 

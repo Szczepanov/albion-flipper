@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, MapPin, Loader2, DollarSign, Package, AlertCircle, TrendingUp } from 'lucide-react';
+import { Search, MapPin, Loader2, DollarSign, Package, AlertCircle, TrendingUp, X } from 'lucide-react';
 import { fetchPrices, fetchHistory } from '../api/albion';
 
 // Royal Cities only — no Caerleon (Red Zone) for safe trading
@@ -71,6 +71,11 @@ export default function Scanner() {
   const [scanProgress, setScanProgress] = useState({ current: 0, total: 0 });
   const [opportunities, setOpportunities] = useState<TradeOpportunity[]>([]);
   const [errorObj, setErrorObj] = useState<string | null>(null);
+  const [excludedItems, setExcludedItems] = useState<Set<string>>(new Set());
+
+  const excludeItem = (itemId: string) => setExcludedItems(prev => new Set([...prev, itemId]));
+  const restoreItem = (itemId: string) => setExcludedItems(prev => { const n = new Set(prev); n.delete(itemId); return n; });
+  const clearExclusions = () => setExcludedItems(new Set());
 
   const toggleTier = (t: string) => {
     const next = new Set(selectedTiers);
@@ -340,7 +345,8 @@ export default function Scanner() {
   // Group Opportunities by Destination City for rendering
   const groupedOpps: Record<string, TradeOpportunity[]> = {};
   opportunities.forEach(opp => {
-    if (opp.manifestQty === 0) return; // Ignore items without allocated budget
+    if (opp.manifestQty === 0) return;
+    if (excludedItems.has(opp.itemId)) return; // Skip excluded items
     if (!groupedOpps[opp.destCity]) groupedOpps[opp.destCity] = [];
     groupedOpps[opp.destCity].push(opp);
   });
@@ -507,7 +513,26 @@ export default function Scanner() {
           </button>
         </div>
         
-        {/* Results Panel */}
+        {/* Exclusion chip bar */}
+        {excludedItems.size > 0 && (
+          <div className="lg:col-span-3 glass-panel p-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider mr-1">Excluded:</span>
+            {[...excludedItems].map(id => {
+              const name = opportunities.find(o => o.itemId === id)?.name ?? id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => restoreItem(id)}
+                  className="flex items-center gap-1.5 text-xs bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-1 rounded-full hover:bg-red-500/20 transition-colors"
+                  title="Click to restore"
+                >
+                  <X size={10} />{name}
+                </button>
+              );
+            })}
+            <button onClick={clearExclusions} className="text-xs text-gray-500 hover:text-gray-300 ml-auto transition-colors">Clear all</button>
+          </div>
+        )}
         <div className="lg:col-span-3">
           {errorObj && (
             <div className="glass-panel border-red-500/30 bg-red-500/10 p-4 mb-6 flex items-start gap-3 fade-in">
@@ -573,7 +598,13 @@ export default function Scanner() {
                                 onError={(e) => { e.currentTarget.style.display = 'none'; }}
                               />
                               <div className="flex flex-col items-start">
-                                <div className="font-semibold text-gray-200">{opp.name}</div>
+                                <a
+                                  href={`/?item=${opp.itemId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-semibold text-gray-200 hover:text-blue-400 transition-colors hover:underline underline-offset-2 cursor-pointer"
+                                  title={`Open ${opp.name} in Arbitrage`}
+                                >{opp.name}</a>
                                 {opp.priceSpikePct !== null && opp.priceSpikePct >= 20 && (
                                   <div className="flex items-center gap-1 text-[10px] font-bold text-orange-400 bg-orange-400/10 border border-orange-400/20 px-1.5 py-0.5 rounded shadow-[0_0_8px_rgba(251,146,60,0.15)] mt-1 tracking-wide uppercase">
                                     <TrendingUp size={10} />
@@ -629,6 +660,15 @@ export default function Scanner() {
                                 ? (opp.totalInvestment / 1_000_000).toFixed(2) + 'M'
                                 : (opp.totalInvestment / 1_000).toFixed(0) + 'k'}
                             </div>
+                          </td>
+                          <td className="p-4 text-center">
+                            <button
+                              onClick={() => excludeItem(opp.itemId)}
+                              className="text-gray-600 hover:text-red-400 hover:bg-red-400/10 rounded-full p-1 transition-colors"
+                              title={`Exclude ${opp.name} from results`}
+                            >
+                              <X size={14} />
+                            </button>
                           </td>
                         </tr>
                       ))}
