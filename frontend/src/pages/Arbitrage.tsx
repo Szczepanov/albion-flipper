@@ -88,7 +88,12 @@ export default function Arbitrage() {
                 type="text" 
                 placeholder="Search for an item (e.g., Adept's Bag)" 
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  if (selectedItem && e.target.value !== selectedItem.name) {
+                    setSelectedItem(null);
+                  }
+                }}
               />
             </div>
             

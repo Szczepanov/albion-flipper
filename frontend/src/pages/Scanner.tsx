@@ -1,8 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Search, MapPin, Loader2, DollarSign, Package, AlertCircle } from 'lucide-react';
-import { fetchPrices, fetchHistory, PriceData, HistoryData } from '../api/albion';
+import { fetchPrices, fetchHistory } from '../api/albion';
 
 const CITIES = ['Martlock', 'Thetford', 'Fort Sterling', 'Lymhurst', 'Bridgewatch', 'Caerleon'];
+
+// Logistics Matrix: Number of city-to-city "jumps" through safe zones.
+// Caerleon is distance '3', but traverses Red Zones (Full Loot PvP risk).
+const CITY_DISTANCES: Record<string, Record<string, number>> = {
+  'Lymhurst':      { 'Fort Sterling': 1, 'Bridgewatch': 1, 'Thetford': 2, 'Martlock': 2, 'Caerleon': 3 },
+  'Fort Sterling': { 'Lymhurst': 1, 'Thetford': 1, 'Martlock': 2, 'Bridgewatch': 2, 'Caerleon': 3 },
+  'Thetford':      { 'Fort Sterling': 1, 'Martlock': 1, 'Lymhurst': 2, 'Bridgewatch': 2, 'Caerleon': 3 },
+  'Martlock':      { 'Thetford': 1, 'Bridgewatch': 1, 'Fort Sterling': 2, 'Lymhurst': 2, 'Caerleon': 3 },
+  'Bridgewatch':   { 'Martlock': 1, 'Lymhurst': 1, 'Thetford': 2, 'Fort Sterling': 2, 'Caerleon': 3 },
+  'Caerleon':      { 'Lymhurst': 3, 'Fort Sterling': 3, 'Thetford': 3, 'Martlock': 3, 'Bridgewatch': 3 }
+};
 
 // Basic filters for the UI
 const TIERS = ['T4', 'T5', 'T6', 'T7', 'T8'];
@@ -27,7 +38,11 @@ interface TradeOpportunity {
   destCity: string;
   buyAtPrice: number;
   sellAtPrice: number;
-  profitPerItem: number;
+  grossProfit: number;
+  travelCost: number;
+  netProfit: number;
+  jumps: number;
+  isRedZone: boolean;
   roi: number;
   destVol24h: number;
   destVol7d: number;
@@ -40,6 +55,7 @@ export default function Scanner() {
   const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set(['BAG']));
   const [minProfit, setMinProfit] = useState(15); // Target ROI %
   const [minVolume, setMinVolume] = useState(10); // Minimum 24h volume
+  const [transportCostPerJump, setTransportCostPerJump] = useState(0); // Estimated silver cost to transport 1 item 1 zone jump
   
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState({ current: 0, total: 0 });
@@ -151,8 +167,19 @@ export default function Scanner() {
           if (destPrices.length === 0) continue;
 
           const bestDestPrice = Math.max(...destPrices.map(p => p.buy_price_max)); // Liquidate to buy orders
-          const profit = bestDestPrice - bestSourcePrice;
-          const roi = (profit / bestSourcePrice) * 100;
+          const grossProfit = bestDestPrice - bestSourcePrice;
+          
+          // Logistics Cost Math
+          const jumps = CITY_DISTANCES[baseCity]?.[destCity] || 0;
+          const isRedZone = destCity === 'Caerleon' || baseCity === 'Caerleon';
+          
+          // If it's a Caerleon route, we might double the travel cost due to risk, or user can factor it mentally.
+          // Let's multiply distance cost by 2 for red zone routes as a safety risk premium
+          const effectiveJumps = isRedZone ? jumps * 2 : jumps;
+          const travelCost = transportCostPerJump * effectiveJumps;
+          
+          const netProfit = grossProfit - travelCost;
+          const roi = (netProfit / (bestSourcePrice + travelCost)) * 100;
 
           if (roi >= minProfit) {
             // Check volume
@@ -188,7 +215,11 @@ export default function Scanner() {
                 destCity: destCity,
                 buyAtPrice: bestSourcePrice,
                 sellAtPrice: bestDestPrice,
-                profitPerItem: profit,
+                grossProfit: grossProfit,
+                travelCost: travelCost,
+                netProfit: netProfit,
+                jumps: jumps,
+                isRedZone: isRedZone,
                 roi: roi,
                 destVol24h: v24,
                 destVol7d: v7d,
@@ -321,7 +352,21 @@ export default function Scanner() {
             </div>
           </div>
 
-          <button 
+          <label className="block text-sm font-medium text-gray-400 mb-2">Transport Cost (Silver / Jump)</label>
+          <div className="relative mb-8">
+            <input
+              type="number"
+              className="search-input text-sm"
+              value={transportCostPerJump}
+              onChange={e => setTransportCostPerJump(Number(e.target.value))}
+              min={0}
+              placeholder="e.g. 50"
+              disabled={isScanning}
+            />
+            <span className="absolute right-3 top-2.5 text-gray-500">🥈</span>
+          </div>
+
+          <button  
             className="action-button w-full flex justify-center py-3" 
             onClick={runScanner} 
             disabled={isScanning}
@@ -359,12 +404,23 @@ export default function Scanner() {
           <div className="flex flex-col gap-6">
             {Object.keys(groupedOpps).map(destCity => (
               <div key={destCity} className="glass-panel fade-in overflow-hidden">
-                <div className="bg-gradient-to-r from-[rgba(255,255,255,0.05)] to-transparent p-4 border-b border-gray-800 flex justify-between items-center">
-                  <h3 className="font-bold text-lg text-white flex items-center gap-2">
-                    <span className="text-blue-400">{baseCity}</span>
-                    <span className="text-gray-500">➔</span>
-                    <span className="text-purple-400">{destCity}</span>
-                  </h3>
+                <div className="bg-gradient-to-r from-[rgba(255,255,255,0.05)] to-transparent p-4 border-b border-gray-800 flex justify-between items-center flex-wrap gap-4">
+                  <div className="flex flex-col">
+                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                      <span className="text-blue-400">{baseCity}</span>
+                      <span className="text-gray-500">➔</span>
+                      <span className={destCity === 'Caerleon' ? 'text-red-500 drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'text-purple-400'}>
+                        {destCity}
+                      </span>
+                    </h3>
+                    {groupedOpps[destCity].length > 0 && (
+                      <div className="text-xs text-gray-400 mt-1 flex items-center gap-1.5">
+                        <MapPin size={12} />
+                        {groupedOpps[destCity][0].jumps} zones away 
+                        {groupedOpps[destCity][0].isRedZone && <span className="text-red-400 font-semibold uppercase tracking-wider text-[10px] ml-1 bg-red-500/10 px-1.5 py-0.5 rounded">High Risk PvP</span>}
+                      </div>
+                    )}
+                  </div>
                   <div className="text-sm text-gray-400 bg-black/30 px-3 py-1 rounded-full">
                     {groupedOpps[destCity].length} viable items
                   </div>
@@ -377,7 +433,7 @@ export default function Scanner() {
                         <th className="p-4 font-medium">Item</th>
                         <th className="p-4 font-medium text-right">Acquisition</th>
                         <th className="p-4 font-medium text-right">Liquidation</th>
-                        <th className="p-4 font-medium text-right">Profit / ROI</th>
+                        <th className="p-4 font-medium text-right">Net Profit / ROI</th>
                         <th className="p-4 font-medium text-center">Dest Volume (24h / 7d)</th>
                       </tr>
                     </thead>
@@ -409,11 +465,16 @@ export default function Scanner() {
                             <div className="text-xs text-gray-500 mt-0.5">Max Buy Order</div>
                           </td>
                           <td className="p-4 text-right">
-                            <div className="font-bold text-white flex items-center justify-end gap-1">
-                              <DollarSign size={14} className="text-green-500" />
-                              {opp.profitPerItem.toLocaleString()}
+                            <div className="font-bold text-white flex flex-col items-end gap-0.5">
+                              <span className="flex items-center gap-1 text-green-400">
+                                <DollarSign size={14} className="text-green-500" />
+                                +{opp.netProfit.toLocaleString()} net
+                              </span>
+                              {opp.travelCost > 0 && (
+                                <span className="text-[10px] text-red-400/80">-{opp.travelCost.toLocaleString()} logistics</span>
+                              )}
                             </div>
-                            <div className="text-xs font-medium mt-0.5 px-1.5 py-0.5 rounded inline-block bg-green-500/20 text-green-400">
+                            <div className="text-xs font-medium mt-1 px-1.5 py-0.5 rounded inline-block bg-green-500/20 text-green-400">
                               {opp.roi.toFixed(1)}% ROI
                             </div>
                           </td>
