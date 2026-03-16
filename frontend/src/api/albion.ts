@@ -50,11 +50,14 @@ export const fetchPrices = async (items: string[], locations: string[] = []): Pr
     }
   }
 
-  // 2. Fetch missing items in chunks (no location param to cache universal data)
+  // 2. Fetch missing items in chunks
+  const ALL_CITIES = 'Martlock,Thetford,Fort%20Sterling,Lymhurst,Bridgewatch,Caerleon';
+  const locsStr = locations.length > 0 ? locations.join(',') : ALL_CITIES;
+
   for (let i = 0; i < missingItems.length; i += CHUNK_SIZE) {
     const chunk = missingItems.slice(i, i + CHUNK_SIZE);
     const itemsStr = chunk.join(',');
-    const url = `${API_BASE}/prices/${itemsStr}.json`;
+    const url = `${API_BASE}/prices/${itemsStr}.json?locations=${locsStr}`;
     
     try {
       const response = await axios.get<PriceData[]>(url);
@@ -111,11 +114,14 @@ export const fetchHistory = async (items: string[], locations: string[] = []): P
   const formatDate = (d: Date) => `${d.getMonth() + 1}-${d.getDate()}-${d.getFullYear()}`;
   const dateStr = `time-scale=24&date=${formatDate(past)}&end_date=${formatDate(today)}`;
 
-  // 2. Fetch missing items in chunks (universal locations)
+  // 2. Fetch missing items in chunks
+  const ALL_CITIES = 'Martlock,Thetford,Fort%20Sterling,Lymhurst,Bridgewatch,Caerleon,Black%20Market';
+  const locsStr = locations.length > 0 ? locations.join(',') : ALL_CITIES;
+
   for (let i = 0; i < missingItems.length; i += CHUNK_SIZE) {
     const chunk = missingItems.slice(i, i + CHUNK_SIZE);
     const itemsStr = chunk.join(',');
-    const url = `${API_BASE}/history/${itemsStr}.json?${dateStr}`;
+    const url = `${API_BASE}/history/${itemsStr}.json?${dateStr}&locations=${locsStr}`;
     
     try {
       const response = await axios.get<HistoryData[]>(url);

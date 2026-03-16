@@ -158,15 +158,11 @@ export default function Scanner() {
         for (const destCity of CITIES) {
           if (destCity === baseCity) continue;
 
-          // What we can sell at: max buy order OR lowest sell order in dest minus 1 silver
-          // Black Market is a special case: we sell directly to buy orders. Real city arbitrage usually implies undercutting sell orders.
-          // For City-to-City, the most guaranteed flip is selling to buy orders, or placing a sell order under the current minimum.
-          // To be safe and calculate "Guaranteed / Safe" flips, let's use Max Buy Order.
-          
-          const destPrices = itemPrices.filter(p => p.city === destCity && p.buy_price_max > 0);
+          // We will use the lowest sell order minus 1 to simulate undercutting, assuming volume is high enough to execute.
+          const destPrices = itemPrices.filter(p => p.city === destCity && p.sell_price_min > 0);
           if (destPrices.length === 0) continue;
 
-          const bestDestPrice = Math.max(...destPrices.map(p => p.buy_price_max)); // Liquidate to buy orders
+          const bestDestPrice = Math.min(...destPrices.map(p => p.sell_price_min)) - 1; // Liquidate by undercutting sell order
           const grossProfit = bestDestPrice - bestSourcePrice;
           
           // Logistics Cost Math
@@ -196,8 +192,8 @@ export default function Scanner() {
                 h.data.forEach(pt => {
                   const ptTime = new Date(pt.timestamp).getTime();
                   const diffd = (now - ptTime) / dayMs;
-                  if (diffd <= 1.5) v24 += pt.item_count;
-                  if (diffd <= 7.5) v7d += pt.item_count;
+                  if (diffd <= 2) v24 += pt.item_count;
+                  if (diffd <= 8) v7d += pt.item_count;
                   
                   if (diffd >= 21 && diffd <= 28.5) {
                     ov += pt.item_count;
@@ -363,7 +359,7 @@ export default function Scanner() {
               placeholder="e.g. 50"
               disabled={isScanning}
             />
-            <span className="absolute right-3 top-2.5 text-gray-500">🥈</span>
+            <span className="absolute right-3 top-2.5 text-gray-500">Silver</span>
           </div>
 
           <button  
@@ -462,7 +458,7 @@ export default function Scanner() {
                           </td>
                           <td className="p-4 text-right">
                             <div className="font-medium text-green-400">+{opp.sellAtPrice.toLocaleString()}</div>
-                            <div className="text-xs text-gray-500 mt-0.5">Max Buy Order</div>
+                            <div className="text-xs text-gray-500 mt-0.5">Undercut Sell</div>
                           </td>
                           <td className="p-4 text-right">
                             <div className="font-bold text-white flex flex-col items-end gap-0.5">

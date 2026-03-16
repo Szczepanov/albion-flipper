@@ -174,8 +174,8 @@ export default function Arbitrage() {
                   hData.data.forEach(point => {
                     const ptTime = new Date(point.timestamp).getTime();
                     const diffDays = (now - ptTime) / dayMs;
-                    if (diffDays <= 1.5) vol24h += point.item_count;
-                    if (diffDays <= 7.5) vol7d += point.item_count;
+                    if (diffDays <= 2) vol24h += point.item_count;
+                    if (diffDays <= 8) vol7d += point.item_count;
                     if (diffDays <= 28.5) vol4w += point.item_count;
                     
                     // Grab historical average price from 3-4 weeks ago (days 21 to 28)
@@ -218,7 +218,7 @@ export default function Arbitrage() {
                     <span style={{ color: 'var(--text-muted)' }}>Min Sell</span>
                     <div style={{ textAlign: 'right' }}>
                       <div className="price-high" style={{ fontWeight: 'bold' }}>
-                        {bestSell ? `${bestSell.sell_price_min.toLocaleString()} 🥈` : 'No Sells'}
+                        {bestSell ? `${bestSell.sell_price_min.toLocaleString()}` : 'No Sells'}
                       </div>
                       {bestSell && (
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
@@ -232,7 +232,7 @@ export default function Arbitrage() {
                     <span style={{ color: 'var(--text-muted)' }}>Max Buy</span>
                     <div style={{ textAlign: 'right' }}>
                       <div className="price-low" style={{ fontWeight: 'bold' }}>
-                        {bestBuy ? `${bestBuy.buy_price_max.toLocaleString()} 🥈` : 'No Buys'}
+                        {bestBuy ? `${bestBuy.buy_price_max.toLocaleString()}` : 'No Buys'}
                       </div>
                       {bestBuy && (
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
@@ -246,7 +246,7 @@ export default function Arbitrage() {
                     <div className="flex justify-between items-center mb-2">
                       <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Avg Price (~4w ago)</span>
                       <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.875rem' }}>
-                        {avgPrice4w ? `${avgPrice4w.toLocaleString()} 🥈` : 'No Data'}
+                        {avgPrice4w ? `${avgPrice4w.toLocaleString()}` : 'No Data'}
                       </span>
                     </div>
                   
