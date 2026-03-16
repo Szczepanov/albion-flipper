@@ -16,6 +16,11 @@ Albion Flipper is a React + TypeScript web app for the **Albion Online Europe se
 - IndexedDB (`idb`) for persistent client-side caching
 - Vanilla CSS (glassmorphism UI)
 
+## Documentation
+
+- `frontend/README.md`: Frontend-focused setup and structure.
+- `docs/ARCHITECTURE.md`: Data flow, caching, and module status overview.
+
 ## Setup
 
 ### Prerequisites
