@@ -1,0 +1,12 @@
+
+> frontend@0.0.0 build
+> tsc -b && vite build
+
+src/api/albion.ts(1,19): error TS2307: Cannot find module 'axios' or its corresponding type declarations.
+src/App.tsx(1,65): error TS2307: Cannot find module 'react-router-dom' or its corresponding type declarations.
+src/App.tsx(5,46): error TS2307: Cannot find module 'lucide-react' or its corresponding type declarations.
+src/App.tsx(18,42): error TS7031: Binding element 'isActive' implicitly has an 'any' type.
+src/App.tsx(22,54): error TS7031: Binding element 'isActive' implicitly has an 'any' type.
+src/App.tsx(26,50): error TS7031: Binding element 'isActive' implicitly has an 'any' type.
+src/pages/Arbitrage.tsx(2,23): error TS1484: 'PriceData' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+src/pages/Arbitrage.tsx(3,36): error TS2307: Cannot find module 'lucide-react' or its corresponding type declarations.
