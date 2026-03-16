@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fetchPrices, fetchHistory, type PriceData, type HistoryData } from '../api/albion';
-import { RefreshCcw, Search } from 'lucide-react';
+import { clearAllCache } from '../api/db';
+import { RefreshCcw, Search, RotateCw } from 'lucide-react';
 
 interface ItemEntry {
   id: string;
@@ -19,6 +20,8 @@ export default function Arbitrage() {
   const [prices, setPrices] = useState<PriceData[]>([]);
   const [history, setHistory] = useState<HistoryData[]>([]);
   const [loading, setLoading] = useState(false);
+  const [updateCooldown, setUpdateCooldown] = useState(0); // seconds remaining
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     // Load local items database
@@ -68,6 +71,25 @@ export default function Arbitrage() {
     await triggerSearch(selectedItem);
   };
 
+  const handleUpdatePrices = async () => {
+    if (!selectedItem || updateCooldown > 0 || loading) return;
+    // Clear only this item from cache then re-fetch
+    await clearAllCache(); // clearing all is fine since next fetch repopulates
+    await triggerSearch(selectedItem);
+    // Start 2-minute cooldown
+    const COOLDOWN = 120;
+    setUpdateCooldown(COOLDOWN);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setUpdateCooldown(prev => {
+        if (prev <= 1) {
+          clearInterval(cooldownRef.current!);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
   const filteredItems = searchTerm.length > 2 
     ? itemsList.filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, 10)
     : [];
@@ -137,13 +159,31 @@ export default function Arbitrage() {
           </button>
           
           {selectedItem && (
-            <button 
-              type="button" 
-              onClick={() => { setSelectedItem(null); setSearchTerm(''); setPrices([]); setHistory([]); setSearchParams({}); }}
-              style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)' }}
-            >
-              Clear
-            </button>
+            <>
+              <button 
+                type="button" 
+                onClick={() => { setSelectedItem(null); setSearchTerm(''); setPrices([]); setHistory([]); setSearchParams({}); }}
+                style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)' }}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={handleUpdatePrices}
+                disabled={updateCooldown > 0 || loading}
+                title={updateCooldown > 0 ? `Available in ${updateCooldown}s` : 'Force-refresh prices from API'}
+                style={{ 
+                  background: 'var(--bg-card)', 
+                  border: '1px solid var(--border-light)', 
+                  color: updateCooldown > 0 ? 'var(--text-muted)' : 'var(--accent-primary)',
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  opacity: updateCooldown > 0 ? 0.6 : 1
+                }}
+              >
+                <RotateCw size={14} className={loading ? 'animate-spin' : ''} />
+                {updateCooldown > 0 ? `${Math.floor(updateCooldown / 60)}:${String(updateCooldown % 60).padStart(2, '0')}` : 'Update Prices'}
+              </button>
+            </>
           )}
         </form>
       </div>
@@ -191,7 +231,7 @@ export default function Arbitrage() {
 
               const isReasonable = (price: number) => {
                 if (!avgPrice4w) return true;
-                return price <= avgPrice4w * 10;
+                return price <= avgPrice4w * 3;
               };
 
               // Find the best sell order (lowest) and best buy order (highest) regardless of quality

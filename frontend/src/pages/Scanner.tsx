@@ -2,28 +2,35 @@ import { useState } from 'react';
 import { Search, MapPin, Loader2, DollarSign, Package, AlertCircle } from 'lucide-react';
 import { fetchPrices, fetchHistory } from '../api/albion';
 
-const CITIES = ['Martlock', 'Thetford', 'Fort Sterling', 'Lymhurst', 'Bridgewatch', 'Caerleon'];
+// Royal Cities only — no Caerleon (Red Zone) for safe trading
+const CITIES = ['Martlock', 'Thetford', 'Fort Sterling', 'Lymhurst', 'Bridgewatch'];
 
-// Logistics Matrix: Number of city-to-city "jumps" through safe zones.
-// Caerleon is distance '3', but traverses Red Zones (Full Loot PvP risk).
+// Jump distances between Royal Cities (safe routes only)
 const CITY_DISTANCES: Record<string, Record<string, number>> = {
-  'Lymhurst':      { 'Fort Sterling': 1, 'Bridgewatch': 1, 'Thetford': 2, 'Martlock': 2, 'Caerleon': 3 },
-  'Fort Sterling': { 'Lymhurst': 1, 'Thetford': 1, 'Martlock': 2, 'Bridgewatch': 2, 'Caerleon': 3 },
-  'Thetford':      { 'Fort Sterling': 1, 'Martlock': 1, 'Lymhurst': 2, 'Bridgewatch': 2, 'Caerleon': 3 },
-  'Martlock':      { 'Thetford': 1, 'Bridgewatch': 1, 'Fort Sterling': 2, 'Lymhurst': 2, 'Caerleon': 3 },
-  'Bridgewatch':   { 'Martlock': 1, 'Lymhurst': 1, 'Thetford': 2, 'Fort Sterling': 2, 'Caerleon': 3 },
-  'Caerleon':      { 'Lymhurst': 3, 'Fort Sterling': 3, 'Thetford': 3, 'Martlock': 3, 'Bridgewatch': 3 }
+  'Lymhurst':      { 'Fort Sterling': 1, 'Bridgewatch': 1, 'Thetford': 2, 'Martlock': 2 },
+  'Fort Sterling': { 'Lymhurst': 1, 'Thetford': 1, 'Martlock': 2, 'Bridgewatch': 2 },
+  'Thetford':      { 'Fort Sterling': 1, 'Martlock': 1, 'Lymhurst': 2, 'Bridgewatch': 2 },
+  'Martlock':      { 'Thetford': 1, 'Bridgewatch': 1, 'Fort Sterling': 2, 'Lymhurst': 2 },
+  'Bridgewatch':   { 'Martlock': 1, 'Lymhurst': 1, 'Thetford': 2, 'Fort Sterling': 2 },
 };
 
 // Basic filters for the UI
-const TIERS = ['T4', 'T5', 'T6', 'T7', 'T8'];
+const TIERS = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8'];
 const CATEGORIES = [
-  { id: 'BAG', label: 'Bags' },
-  { id: 'CAPE', label: 'Capes' },
-  { id: 'MOUNT', label: 'Mounts' },
-  { id: 'POTION', label: 'Potions' },
-  { id: 'MEAL', label: 'Meals' },
-  { id: 'WEAPON', label: 'Weapons / Armor', searchStr: 'MAIN|2H|HEAD|ARMOR|SHOES' } // simple regex matcher
+  // Equipment
+  { id: 'WEAPON',   label: 'Weapons',       searchStr: 'MAIN|2H|OFF' },
+  { id: 'ARMOR',    label: 'Armor',          searchStr: 'HEAD|ARMOR|SHOES' },
+  { id: 'BAG',      label: 'Bags',           searchStr: 'BAG|BACKPACK' },
+  { id: 'CAPE',     label: 'Capes',          searchStr: 'CAPEITEM|^CAPE$' },
+  { id: 'MOUNT',    label: 'Mounts',         searchStr: 'MOUNT' },
+  // Consumables
+  { id: 'MEAL',     label: 'Meals',          searchStr: 'MEAL' },
+  { id: 'POTION',   label: 'Potions',        searchStr: 'POTION' },
+  { id: 'FISH',     label: 'Fish',           searchStr: 'FISH' },
+  // Raw Materials
+  { id: 'RAW',      label: 'Raw Materials',  searchStr: 'WOOD|ORE|HIDE|FIBER|ROCK|FARM' },
+  // Refined Materials
+  { id: 'REFINED',  label: 'Refined Mats',   searchStr: 'PLANKS|METALBAR|LEATHER|CLOTH|STONEBLOCK' },
 ];
 
 interface ItemEntry {
@@ -39,23 +46,25 @@ interface TradeOpportunity {
   buyAtPrice: number;
   sellAtPrice: number;
   grossProfit: number;
-  travelCost: number;
-  netProfit: number;
-  jumps: number;
-  isRedZone: boolean;
   roi: number;
+  jumps: number;
   destVol24h: number;
   destVol7d: number;
   avgPrice4w: number | null;
+  recommendedQty: number;   // capped by volume share
+  manifestQty: number;      // final budget-allocated qty (greedy across route)
+  totalInvestment: number;
+  totalProfit: number;
 }
 
 export default function Scanner() {
   const [baseCity, setBaseCity] = useState('Lymhurst');
-  const [selectedTiers, setSelectedTiers] = useState<Set<string>>(new Set(['T4']));
-  const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set(['BAG']));
-  const [minProfit, setMinProfit] = useState(15); // Target ROI %
-  const [minVolume, setMinVolume] = useState(10); // Minimum 24h volume
-  const [transportCostPerJump, setTransportCostPerJump] = useState(0); // Estimated silver cost to transport 1 item 1 zone jump
+  const [selectedTiers, setSelectedTiers] = useState<Set<string>>(new Set(TIERS));
+  const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set(CATEGORIES.map(c => c.id)));
+  const [minProfit, setMinProfit] = useState(15);
+  const [minVolume, setMinVolume] = useState(10);
+  const [budget, setBudget] = useState(1_000_000);
+  const [maxMarketShare, setMaxMarketShare] = useState(20);
   
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState({ current: 0, total: 0 });
@@ -119,9 +128,9 @@ export default function Scanner() {
         return;
       }
       
-      // Limit to 200 items max for prototype safety
-      if (targetIds.length > 250) {
-        targetIds.length = 250; 
+      // Cap to 500 items per scan for performance — increase once caching is populated
+      if (targetIds.length > 500) {
+        targetIds.length = 500;
       }
 
       setScanProgress({ current: 0, total: targetIds.length });
@@ -147,8 +156,32 @@ export default function Scanner() {
 
         if (itemPrices.length === 0) continue;
 
+        const now = Date.now();
+        const dayMs = 1000 * 60 * 60 * 24;
+
+        // Establish a global anchor price from 3-4 week old history to prevent troll listings (e.g. 29 million silver pies)
+        let anchorVol = 0;
+        let anchorSum = 0;
+        itemHist.forEach(h => {
+          if (h.data) {
+            h.data.forEach(pt => {
+              const diffd = (now - new Date(pt.timestamp).getTime()) / dayMs;
+              if (diffd >= 21 && diffd <= 28.5) {
+                anchorVol += pt.item_count;
+                anchorSum += (pt.avg_price * pt.item_count);
+              }
+            });
+          }
+        });
+        const anchorPrice = anchorVol > 0 ? (anchorSum / anchorVol) : null;
+        
+        const isReasonable = (price: number) => {
+          if (!anchorPrice) return true;
+          return price <= anchorPrice * 3; // Block outliers >3x historical avg
+        };
+
         // Source prices (what we buy at: min sell order in source city)
-        const sourcePrices = itemPrices.filter(p => p.city === baseCity && p.sell_price_min > 0);
+        const sourcePrices = itemPrices.filter(p => p.city === baseCity && p.sell_price_min > 0 && isReasonable(p.sell_price_min));
         if (sourcePrices.length === 0) continue;
 
         // We assume we buy the cheapest available across all qualities
@@ -159,23 +192,14 @@ export default function Scanner() {
           if (destCity === baseCity) continue;
 
           // We will use the lowest sell order minus 1 to simulate undercutting, assuming volume is high enough to execute.
-          const destPrices = itemPrices.filter(p => p.city === destCity && p.sell_price_min > 0);
+          const destPrices = itemPrices.filter(p => p.city === destCity && p.sell_price_min > 0 && isReasonable(p.sell_price_min));
           if (destPrices.length === 0) continue;
 
-          const bestDestPrice = Math.min(...destPrices.map(p => p.sell_price_min)) - 1; // Liquidate by undercutting sell order
+          const bestDestPrice = Math.min(...destPrices.map(p => p.sell_price_min)) - 1;
           const grossProfit = bestDestPrice - bestSourcePrice;
-          
-          // Logistics Cost Math
           const jumps = CITY_DISTANCES[baseCity]?.[destCity] || 0;
-          const isRedZone = destCity === 'Caerleon' || baseCity === 'Caerleon';
-          
-          // If it's a Caerleon route, we might double the travel cost due to risk, or user can factor it mentally.
-          // Let's multiply distance cost by 2 for red zone routes as a safety risk premium
-          const effectiveJumps = isRedZone ? jumps * 2 : jumps;
-          const travelCost = transportCostPerJump * effectiveJumps;
-          
-          const netProfit = grossProfit - travelCost;
-          const roi = (netProfit / (bestSourcePrice + travelCost)) * 100;
+          // ROI is purely gross — travel cost is a fixed trip overhead shown at route level
+          const roi = (grossProfit / bestSourcePrice) * 100;
 
           if (roi >= minProfit) {
             // Check volume
@@ -184,8 +208,6 @@ export default function Scanner() {
             let v7d = 0;
             let ov = 0;
             let ops = 0;
-            const now = Date.now();
-            const dayMs = 1000 * 60 * 60 * 24;
 
             destHist.forEach(h => {
               if (h.data) {
@@ -204,6 +226,10 @@ export default function Scanner() {
             });
 
             if (v24 >= minVolume) {
+              const maxQtyByBudget = budget > 0 ? Math.floor(budget / bestSourcePrice) : 9999;
+              const maxQtyByVolume = Math.floor(v24 * (maxMarketShare / 100));
+              const recommendedQty = Math.max(1, Math.min(maxQtyByBudget, maxQtyByVolume));
+              
               newOpps.push({
                 itemId: item.id,
                 name: item.name,
@@ -212,22 +238,43 @@ export default function Scanner() {
                 buyAtPrice: bestSourcePrice,
                 sellAtPrice: bestDestPrice,
                 grossProfit: grossProfit,
-                travelCost: travelCost,
-                netProfit: netProfit,
-                jumps: jumps,
-                isRedZone: isRedZone,
                 roi: roi,
+                jumps: jumps,
                 destVol24h: v24,
                 destVol7d: v7d,
-                avgPrice4w: ov > 0 ? Math.round(ops / ov) : null
+                avgPrice4w: ov > 0 ? Math.round(ops / ov) : null,
+                recommendedQty: recommendedQty,
+                manifestQty: 0, // filled by greedy pass below
+                totalInvestment: 0,
+                totalProfit: 0,
               });
             }
           }
         }
       }
 
-      // Sort globally by total theoretical ROI
+      // Sort globally by ROI for the manifest greedy pass
       newOpps.sort((a, b) => b.roi - a.roi);
+
+      // Greedy cargo manifest: per route, allocate budget top-down by ROI
+      const cityGroups: Record<string, TradeOpportunity[]> = {};
+      newOpps.forEach(o => { if (!cityGroups[o.destCity]) cityGroups[o.destCity] = []; cityGroups[o.destCity].push(o); });
+
+      Object.values(cityGroups).forEach(group => {
+        // Already sorted by ROI desc; allocate budget greedily
+        let remaining = budget;
+        group.forEach(opp => {
+          const maxCanBuy = opp.buyAtPrice > 0 ? Math.floor(remaining / opp.buyAtPrice) : 0;
+          const mQty = Math.min(opp.recommendedQty, maxCanBuy);
+          opp.manifestQty = mQty;
+          opp.totalInvestment = mQty * opp.buyAtPrice;
+          opp.totalProfit = mQty * opp.grossProfit;
+          remaining -= opp.totalInvestment;
+        });
+      });
+
+      // Re-sort by total profit for final display
+      newOpps.sort((a, b) => b.totalProfit - a.totalProfit);
       setOpportunities(newOpps);
 
     } catch (err: any) {
@@ -348,18 +395,35 @@ export default function Scanner() {
             </div>
           </div>
 
-          <label className="block text-sm font-medium text-gray-400 mb-2">Transport Cost (Silver / Jump)</label>
-          <div className="relative mb-8">
+          <label className="block text-sm font-medium text-gray-400 mb-2">Capital Budget (Silver)</label>
+          <div className="relative mb-4">
             <input
               type="number"
               className="search-input text-sm"
-              value={transportCostPerJump}
-              onChange={e => setTransportCostPerJump(Number(e.target.value))}
+              value={budget}
+              onChange={e => setBudget(Number(e.target.value))}
               min={0}
-              placeholder="e.g. 50"
+              step={100000}
+              placeholder="e.g. 1000000"
               disabled={isScanning}
             />
-            <span className="absolute right-3 top-2.5 text-gray-500">Silver</span>
+            <DollarSign size={14} className="absolute right-3 top-3 text-gray-500" />
+          </div>
+
+          <label className="block text-sm font-medium text-gray-400 mb-2">Max Market Share ({maxMarketShare}% of 24h vol)</label>
+          <div className="relative mb-8">
+            <input
+              type="range"
+              min={1}
+              max={50}
+              value={maxMarketShare}
+              onChange={e => setMaxMarketShare(Number(e.target.value))}
+              disabled={isScanning}
+              style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
+            />
+            <div className="flex justify-between text-xs text-gray-600 mt-1">
+              <span>1%</span><span>50%</span>
+            </div>
           </div>
 
           <button  
@@ -405,17 +469,25 @@ export default function Scanner() {
                     <h3 className="font-bold text-lg text-white flex items-center gap-2">
                       <span className="text-blue-400">{baseCity}</span>
                       <span className="text-gray-500">➔</span>
-                      <span className={destCity === 'Caerleon' ? 'text-red-500 drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'text-purple-400'}>
-                        {destCity}
-                      </span>
+                      <span className="text-purple-400">{destCity}</span>
                     </h3>
-                    {groupedOpps[destCity].length > 0 && (
-                      <div className="text-xs text-gray-400 mt-1 flex items-center gap-1.5">
-                        <MapPin size={12} />
-                        {groupedOpps[destCity][0].jumps} zones away 
-                        {groupedOpps[destCity][0].isRedZone && <span className="text-red-400 font-semibold uppercase tracking-wider text-[10px] ml-1 bg-red-500/10 px-1.5 py-0.5 rounded">High Risk PvP</span>}
-                      </div>
-                    )}
+                    {(() => {
+                      const items = groupedOpps[destCity];
+                      const jumps = items[0]?.jumps || 0;
+                      const tripMinutes = jumps * 10;
+                      const totalRouteProfit = items.reduce((s, o) => s + o.totalProfit, 0);
+                      const silverPerHour = tripMinutes > 0 ? Math.round(totalRouteProfit / (tripMinutes / 60)) : 0;
+                      const fmtSilver = (n: number) => n >= 1_000_000 ? (n/1_000_000).toFixed(1)+'M' : n >= 1_000 ? (n/1_000).toFixed(0)+'k' : n.toString();
+                      return (
+                        <div className="text-xs text-gray-400 mt-1 flex flex-wrap items-center gap-3">
+                          <span className="flex items-center gap-1">
+                            <MapPin size={11} />{jumps} jump{jumps !== 1 ? 's' : ''} (~{tripMinutes} min)
+                          </span>
+                          <span className="text-emerald-400 font-semibold">+{fmtSilver(totalRouteProfit)} total</span>
+                          <span className="text-yellow-400/80">{fmtSilver(silverPerHour)}/hr</span>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="text-sm text-gray-400 bg-black/30 px-3 py-1 rounded-full">
                     {groupedOpps[destCity].length} viable items
@@ -427,10 +499,11 @@ export default function Scanner() {
                     <thead>
                       <tr className="border-b border-gray-800 text-sm text-gray-400 uppercase tracking-wider">
                         <th className="p-4 font-medium">Item</th>
-                        <th className="p-4 font-medium text-right">Acquisition</th>
-                        <th className="p-4 font-medium text-right">Liquidation</th>
-                        <th className="p-4 font-medium text-right">Net Profit / ROI</th>
-                        <th className="p-4 font-medium text-center">Dest Volume (24h / 7d)</th>
+                        <th className="p-4 font-medium text-right">Buy @ Source</th>
+                        <th className="p-4 font-medium text-right">Sell @ Dest</th>
+                        <th className="p-4 font-medium text-right">Gross / ROI</th>
+                        <th className="p-4 font-medium text-center">Qty (24h vol)</th>
+                        <th className="p-4 font-medium text-right">Total Profit</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -447,43 +520,48 @@ export default function Scanner() {
                               <div>
                                 <div className="font-semibold text-gray-200">{opp.name}</div>
                                 <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
-                                  Avg Price 4w: <span className="text-gray-300">{opp.avgPrice4w ? `${opp.avgPrice4w.toLocaleString()}` : '-'}</span>
+                                  Avg 4w: <span className="text-gray-300">{opp.avgPrice4w ? opp.avgPrice4w.toLocaleString() : '-'}</span>
                                 </div>
                               </div>
                             </div>
                           </td>
                           <td className="p-4 text-right">
                             <div className="font-medium text-red-400">-{opp.buyAtPrice.toLocaleString()}</div>
-                            <div className="text-xs text-gray-500 mt-0.5">Min Sell Order</div>
+                            <div className="text-xs text-gray-500 mt-0.5">per item</div>
                           </td>
                           <td className="p-4 text-right">
                             <div className="font-medium text-green-400">+{opp.sellAtPrice.toLocaleString()}</div>
-                            <div className="text-xs text-gray-500 mt-0.5">Undercut Sell</div>
+                            <div className="text-xs text-gray-500 mt-0.5">undercut</div>
                           </td>
                           <td className="p-4 text-right">
                             <div className="font-bold text-white flex flex-col items-end gap-0.5">
                               <span className="flex items-center gap-1 text-green-400">
-                                <DollarSign size={14} className="text-green-500" />
-                                +{opp.netProfit.toLocaleString()} net
+                                +{opp.grossProfit.toLocaleString()}
                               </span>
-                              {opp.travelCost > 0 && (
-                                <span className="text-[10px] text-red-400/80">-{opp.travelCost.toLocaleString()} logistics</span>
-                              )}
                             </div>
                             <div className="text-xs font-medium mt-1 px-1.5 py-0.5 rounded inline-block bg-green-500/20 text-green-400">
                               {opp.roi.toFixed(1)}% ROI
                             </div>
                           </td>
                           <td className="p-4">
-                            <div className="flex justify-center gap-3">
-                              <div className="text-center">
-                                <span className="block font-medium text-gray-200">{opp.destVol24h.toLocaleString()}</span>
-                                <span className="text-[10px] text-gray-500 uppercase">24h</span>
-                              </div>
-                              <div className="text-center">
-                                <span className="block font-medium text-gray-200">{opp.destVol7d.toLocaleString()}</span>
-                                <span className="text-[10px] text-gray-500 uppercase">7d</span>
-                              </div>
+                            <div className="flex flex-col items-center">
+                              <span className="font-bold text-white text-base">×{opp.manifestQty.toLocaleString()}</span>
+                              <span className="text-[10px] text-gray-500 mt-0.5">{opp.destVol24h.toLocaleString()} 24h vol</span>
+                              <span className="text-[10px] text-gray-600">{opp.destVol7d.toLocaleString()} 7d</span>
+                            </div>
+                          </td>
+                          <td className="p-4 text-right">
+                            <div className="font-bold text-emerald-400 text-base">
+                              +{opp.totalProfit >= 1_000_000
+                                ? (opp.totalProfit / 1_000_000).toFixed(2) + 'M'
+                                : opp.totalProfit >= 1_000
+                                  ? (opp.totalProfit / 1_000).toFixed(1) + 'k'
+                                  : opp.totalProfit.toLocaleString()}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              invest {opp.totalInvestment >= 1_000_000
+                                ? (opp.totalInvestment / 1_000_000).toFixed(2) + 'M'
+                                : (opp.totalInvestment / 1_000).toFixed(0) + 'k'}
                             </div>
                           </td>
                         </tr>

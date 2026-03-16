@@ -72,3 +72,9 @@ export async function setCachedHistory(itemId: string, data: HistoryData[]) {
     data: data
   });
 }
+
+export async function clearAllCache() {
+  const db = await initDB();
+  await db.clear('prices');
+  await db.clear('history');
+}
