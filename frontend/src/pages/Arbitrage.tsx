@@ -250,34 +250,45 @@ export default function Arbitrage() {
                   const mostRecent = sortedDays[0];
                   const diffdLatest = (now - mostRecent.timestamp) / dayMs;
                   
-                  if (diffdLatest <= 10) { // Only consider recent data for 24h/7d
-                    vol24h = mostRecent.item_count;
+                  if (diffdLatest <= 30) { // Consider up to 30 days for last known price
+                    vol24h = diffdLatest <= 1 ? mostRecent.item_count : 0;
                     lastKnownPrice = Math.round(mostRecent.avg_price);
                     lastKnownDate = mostRecent.dateStr;
 
-                    const top7 = sortedDays.slice(0, 7);
-                    vol7d = Math.round(top7.reduce((sum, pt) => sum + pt.item_count, 0) / top7.length);
-                    const top7Vol = top7.reduce((sum, pt) => sum + pt.item_count, 0);
-                    avgPrice7d = top7Vol > 0 ? Math.round(top7.reduce((sum, pt) => sum + (pt.avg_price * pt.item_count), 0) / top7Vol) : null;
+                    // Calculate 7d volume strictly for the last 7 days from NOW
+                    vol7d = 0;
+                    let top7Vol = 0;
+                    let top7TempSum = 0;
+                    
+                    sortedDays.forEach(pt => {
+                      const diffd = (now - pt.timestamp) / dayMs;
+                      if (diffd <= 7) {
+                        vol7d += Math.round(pt.item_count / 7);
+                        top7Vol += pt.item_count;
+                        top7TempSum += (pt.avg_price * pt.item_count);
+                      }
+                    });
+                    
+                    avgPrice7d = top7Vol > 0 ? Math.round(top7TempSum / top7Vol) : null;
                     
                     const top3 = sortedDays.slice(0, 3);
                     const top3Vol = top3.reduce((sum, pt) => sum + pt.item_count, 0);
                     recentAvgPrice = top3Vol > 0
                       ? top3.reduce((sum, pt) => sum + (pt.avg_price * pt.item_count), 0) / top3Vol
                       : null;
-
-                    // 4w moving average calculation
-                    sortedDays.forEach(pt => {
-                      const diffd = (now - pt.timestamp) / dayMs;
-                      if (diffd >= 21 && diffd <= 28.5) { // Roughly 3-4 weeks ago
-                        oldVolume += pt.item_count;
-                        oldPriceSum += (pt.avg_price * pt.item_count);
-                      }
-                      if (diffd <= 28.5) { // Total volume for the last 4 weeks
-                        vol4w += pt.item_count;
-                      }
-                    });
                   }
+
+                  // 4w moving average calculation (always run this regardless of recent data)
+                  sortedDays.forEach(pt => {
+                    const diffd = (now - pt.timestamp) / dayMs;
+                    if (diffd >= 21 && diffd <= 28.5) { // Roughly 3-4 weeks ago
+                      oldVolume += pt.item_count;
+                      oldPriceSum += (pt.avg_price * pt.item_count);
+                    }
+                    if (diffd <= 28.5) { // Total volume for the last 4 weeks
+                      vol4w += pt.item_count;
+                    }
+                  });
                 }
               }
               

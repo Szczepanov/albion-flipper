@@ -253,30 +253,39 @@ export default function Scanner() {
               const mostRecent = sortedDays[0];
               const diffdLatest = (now - mostRecent.timestamp) / dayMs;
 
-              // If the most recent data is older than 10 days, it's a dead market
-              if (diffdLatest <= 10) {
-                v24 = mostRecent.item_count;
+                  if (diffdLatest <= 30) {
+                    v24 = diffdLatest <= 2 ? mostRecent.item_count : 0;
 
-                // Avg the top 7 available consecutive records we have for "7d"
-                const top7 = sortedDays.slice(0, 7);
-                v7d = Math.round(top7.reduce((sum, pt) => sum + pt.item_count, 0) / top7.length);
+                    // Calculate 7d volume strictly for the last 7 days from NOW
+                    v7d = 0;
+                    let top7Vol = 0;
+                    let top7TempSum = 0;
+                    
+                    sortedDays.forEach(pt => {
+                      const diffd = (now - pt.timestamp) / dayMs;
+                      if (diffd <= 7) {
+                        v7d += Math.round(pt.item_count / 7);
+                        top7Vol += pt.item_count;
+                        top7TempSum += (pt.avg_price * pt.item_count);
+                      }
+                    });
 
                 // Use up to last 3 active days as the "recent actual traded price"
-                const top3 = sortedDays.slice(0, 3);
-                const top3Vol = top3.reduce((sum, pt) => sum + pt.item_count, 0);
-                recentAvgPrice = top3Vol > 0
-                  ? top3.reduce((sum, pt) => sum + (pt.avg_price * pt.item_count), 0) / top3Vol
-                  : null;
-
-                // 4w moving average (points ~21-28 days ago)
-                sortedDays.forEach(pt => {
-                  const diffd = (now - pt.timestamp) / dayMs;
-                  if (diffd >= 21 && diffd <= 28.5) {
-                    ov += pt.item_count;
-                    ops += (pt.avg_price * pt.item_count);
+                    const top3 = sortedDays.slice(0, 3);
+                    const top3Vol = top3.reduce((sum, pt) => sum + pt.item_count, 0);
+                    recentAvgPrice = top3Vol > 0
+                      ? top3.reduce((sum, pt) => sum + (pt.avg_price * pt.item_count), 0) / top3Vol
+                      : null;
                   }
-                });
-              }
+
+                  // 4w moving average (points ~21-28 days ago)
+                  sortedDays.forEach(pt => {
+                    const diffd = (now - pt.timestamp) / dayMs;
+                    if (diffd >= 21 && diffd <= 28.5) {
+                      ov += pt.item_count;
+                      ops += (pt.avg_price * pt.item_count);
+                    }
+                  });
             }
           }
 
