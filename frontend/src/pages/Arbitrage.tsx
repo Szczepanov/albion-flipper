@@ -218,6 +218,9 @@ export default function Arbitrage() {
               let oldVolume = 0;
               let oldPriceSum = 0;
               let recentAvgPrice: number | null = null;
+              let lastKnownPrice: number | null = null;
+              let avgPrice7d: number | null = null;
+              let lastKnownDate: string | null = null;
 
               if (cityHistory.length > 0) {
                 const dailyTotals = new Map<string, { count: number; value: number }>();
@@ -249,8 +252,13 @@ export default function Arbitrage() {
                   
                   if (diffdLatest <= 10) { // Only consider recent data for 24h/7d
                     vol24h = mostRecent.item_count;
+                    lastKnownPrice = Math.round(mostRecent.avg_price);
+                    lastKnownDate = mostRecent.dateStr;
+
                     const top7 = sortedDays.slice(0, 7);
                     vol7d = Math.round(top7.reduce((sum, pt) => sum + pt.item_count, 0) / top7.length);
+                    const top7Vol = top7.reduce((sum, pt) => sum + pt.item_count, 0);
+                    avgPrice7d = top7Vol > 0 ? Math.round(top7.reduce((sum, pt) => sum + (pt.avg_price * pt.item_count), 0) / top7Vol) : null;
                     
                     const top3 = sortedDays.slice(0, 3);
                     const top3Vol = top3.reduce((sum, pt) => sum + pt.item_count, 0);
@@ -341,14 +349,19 @@ export default function Arbitrage() {
 
                   <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-light)' }}>
                     <div className="flex justify-between items-center mb-2">
-                      <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Est. Actual Price</span>
+                      <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Last Known Price</span>
                       <div className="flex flex-col items-end">
                         <span style={{ fontWeight: 600, color: 'var(--accent-primary)', fontSize: '0.9rem' }}>
-                          {estimatedActual.price ? `${estimatedActual.price.toLocaleString()}` : 'No Data'}
+                          {lastKnownPrice ? `${lastKnownPrice.toLocaleString()}` : 'No Data'}
+                          {avgPrice7d && (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '6px' }}>
+                              (7d: {avgPrice7d.toLocaleString()})
+                            </span>
+                          )}
                         </span>
-                        {estimatedActual.price && (
+                        {lastKnownDate && (
                           <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                            Model: {ACTUAL_PRICE_LABELS[estimatedActual.model]}
+                            Last Traded: {lastKnownDate}
                           </span>
                         )}
                       </div>
