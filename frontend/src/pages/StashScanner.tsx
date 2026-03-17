@@ -2,8 +2,8 @@ import { useState, useMemo } from 'react';
 import { Search, MapPin, Loader2, Package, AlertCircle, TrendingUp, X } from 'lucide-react';
 import { fetchPrices, fetchHistory } from '../api/albion';
 
-// Royal Cities only — no Caerleon (Red Zone) for safe trading
-const CITIES = ['Martlock', 'Thetford', 'Fort Sterling', 'Lymhurst', 'Bridgewatch'];
+// Royal cities plus Caerleon
+const CITIES = ['Martlock', 'Thetford', 'Fort Sterling', 'Lymhurst', 'Bridgewatch', 'Caerleon'];
 
 // Basic filters for the UI
 const TIERS = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8'];
@@ -142,7 +142,7 @@ export default function StashScanner() {
       setScanProgress({ current: Math.floor(targetIds.length / 2), total: targetIds.length }); // half way
       
       const [priceData, histData] = await Promise.all([
-        fetchPrices(justIds, CITIES), // explicit fetch just for Royal Cities
+        fetchPrices(justIds, CITIES), // explicit fetch for selected city set
         fetchHistory(justIds) // Fetch for all cities to compute global anchor price
       ]);
 

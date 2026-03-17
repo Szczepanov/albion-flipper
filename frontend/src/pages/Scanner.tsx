@@ -3,16 +3,17 @@ import { Search, MapPin, Loader2, DollarSign, Package, AlertCircle, TrendingUp, 
 import { fetchPrices, fetchHistory } from '../api/albion';
 import { estimateActualTradingPrice, ACTUAL_PRICE_LABELS, type ActualPriceModel } from '../utils/price';
 
-// Royal Cities only — no Caerleon (Red Zone) for safe trading
-const CITIES = ['Martlock', 'Thetford', 'Fort Sterling', 'Lymhurst', 'Bridgewatch'];
+// Royal cities plus Caerleon
+const CITIES = ['Martlock', 'Thetford', 'Fort Sterling', 'Lymhurst', 'Bridgewatch', 'Caerleon'];
 
-// Jump distances between Royal Cities (safe routes only)
+// Approximate jump distances used for route penalty scoring
 const CITY_DISTANCES: Record<string, Record<string, number>> = {
-  'Lymhurst':      { 'Fort Sterling': 1, 'Bridgewatch': 1, 'Thetford': 2, 'Martlock': 2 },
-  'Fort Sterling': { 'Lymhurst': 1, 'Thetford': 1, 'Martlock': 2, 'Bridgewatch': 2 },
-  'Thetford':      { 'Fort Sterling': 1, 'Martlock': 1, 'Lymhurst': 2, 'Bridgewatch': 2 },
-  'Martlock':      { 'Thetford': 1, 'Bridgewatch': 1, 'Fort Sterling': 2, 'Lymhurst': 2 },
-  'Bridgewatch':   { 'Martlock': 1, 'Lymhurst': 1, 'Thetford': 2, 'Fort Sterling': 2 },
+  'Lymhurst':      { 'Fort Sterling': 1, 'Bridgewatch': 1, 'Thetford': 2, 'Martlock': 2, 'Caerleon': 3 },
+  'Fort Sterling': { 'Lymhurst': 1, 'Thetford': 1, 'Martlock': 2, 'Bridgewatch': 2, 'Caerleon': 3 },
+  'Thetford':      { 'Fort Sterling': 1, 'Martlock': 1, 'Lymhurst': 2, 'Bridgewatch': 2, 'Caerleon': 3 },
+  'Martlock':      { 'Thetford': 1, 'Bridgewatch': 1, 'Fort Sterling': 2, 'Lymhurst': 2, 'Caerleon': 3 },
+  'Bridgewatch':   { 'Martlock': 1, 'Lymhurst': 1, 'Thetford': 2, 'Fort Sterling': 2, 'Caerleon': 3 },
+  'Caerleon':      { 'Lymhurst': 3, 'Fort Sterling': 3, 'Thetford': 3, 'Martlock': 3, 'Bridgewatch': 3 },
 };
 
 // Basic filters for the UI

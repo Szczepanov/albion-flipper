@@ -2,6 +2,9 @@ import axios from 'axios';
 import { getCachedPrice, setCachedPrice, getCachedHistory, setCachedHistory } from './db';
 
 const API_BASE = 'https://europe.albion-online-data.com/api/v2/stats';
+const toLocKey = (locations: string[]) => (
+  locations.length > 0 ? locations.slice().sort().join('|') : '__ALL__'
+);
 
 export interface PriceData {
   item_id: string;
@@ -39,10 +42,12 @@ export const fetchPrices = async (items: string[], locations: string[] = []): Pr
   
   const missingItems: string[] = [];
   let results: PriceData[] = [];
+  const locKey = toLocKey(locations);
 
   // 1. Check IDB for cached data
   for (const itemId of items) {
-    const cached = await getCachedPrice(itemId, CACHE_TTL);
+    const cacheKey = `${itemId}::${locKey}`;
+    const cached = await getCachedPrice(cacheKey, CACHE_TTL);
     if (cached) {
       results.push(...cached);
     } else {
@@ -52,7 +57,7 @@ export const fetchPrices = async (items: string[], locations: string[] = []): Pr
 
   // 2. Fetch missing items in chunks
   const ALL_CITIES = 'Martlock,Thetford,Fort%20Sterling,Lymhurst,Bridgewatch,Caerleon';
-  const locsStr = locations.length > 0 ? locations.join(',') : ALL_CITIES;
+  const locsStr = locations.length > 0 ? locations.map(l => encodeURIComponent(l)).join(',') : ALL_CITIES;
 
   for (let i = 0; i < missingItems.length; i += CHUNK_SIZE) {
     const chunk = missingItems.slice(i, i + CHUNK_SIZE);
@@ -73,7 +78,7 @@ export const fetchPrices = async (items: string[], locations: string[] = []): Pr
       
       // Cache the results (including empty ones to map dead items)
       for (const id of chunk) {
-        await setCachedPrice(id, groupedData[id] || []);
+        await setCachedPrice(`${id}::${locKey}`, groupedData[id] || []);
       }
     } catch (err) {
       console.error('Error fetching prices batch:', err);
@@ -96,10 +101,12 @@ export const fetchHistory = async (items: string[], locations: string[] = []): P
   
   const missingItems: string[] = [];
   let results: HistoryData[] = [];
+  const locKey = toLocKey(locations);
 
   // 1. Check IDB
   for (const itemId of items) {
-    const cached = await getCachedHistory(itemId, CACHE_TTL);
+    const cacheKey = `${itemId}::${locKey}`;
+    const cached = await getCachedHistory(cacheKey, CACHE_TTL);
     if (cached) {
       results.push(...cached);
     } else {
@@ -116,7 +123,7 @@ export const fetchHistory = async (items: string[], locations: string[] = []): P
 
   // 2. Fetch missing items in chunks
   const ALL_CITIES = 'Martlock,Thetford,Fort%20Sterling,Lymhurst,Bridgewatch,Caerleon,Black%20Market';
-  const locsStr = locations.length > 0 ? locations.join(',') : ALL_CITIES;
+  const locsStr = locations.length > 0 ? locations.map(l => encodeURIComponent(l)).join(',') : ALL_CITIES;
 
   for (let i = 0; i < missingItems.length; i += CHUNK_SIZE) {
     const chunk = missingItems.slice(i, i + CHUNK_SIZE);
@@ -136,7 +143,7 @@ export const fetchHistory = async (items: string[], locations: string[] = []): P
       }
       
       for (const id of chunk) {
-        await setCachedHistory(id, groupedData[id] || []);
+        await setCachedHistory(`${id}::${locKey}`, groupedData[id] || []);
       }
     } catch (err) {
       console.error('Error fetching history batch:', err);
@@ -149,4 +156,3 @@ export const fetchHistory = async (items: string[], locations: string[] = []): P
   }
   return results;
 };
-

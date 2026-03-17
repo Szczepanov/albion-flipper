@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fetchPrices, fetchHistory, type PriceData, type HistoryData } from '../api/albion';
-import { estimateActualTradingPrice, ACTUAL_PRICE_LABELS } from '../utils/price';
+// import { estimateActualTradingPrice } from '../utils/price';
 import { RefreshCcw, Search, RotateCw } from 'lucide-react';
 
 interface ItemEntry {
@@ -76,10 +76,8 @@ export default function Arbitrage() {
     if (!selectedItem || updateCooldown > 0 || loading || isRefreshing) return;
     setIsRefreshing(true);
     try {
-      const { initDB } = await import('../api/db');
-      const db = await initDB();
-      await db.delete('prices', selectedItem.id);
-      await db.delete('history', selectedItem.id);
+      const { clearItemCache } = await import('../api/db');
+      await clearItemCache(selectedItem.id);
       await triggerSearch(selectedItem);
       // Start 2-minute cooldown
       const COOLDOWN = 120;
@@ -222,7 +220,6 @@ export default function Arbitrage() {
               let vol4w = 0;
               let oldVolume = 0;
               let oldPriceSum = 0;
-              let recentAvgPrice: number | null = null;
               let lastKnownPrice: number | null = null;
               let avgPrice7d: number | null = null;
               let lastKnownDate: string | null = null;
@@ -276,11 +273,7 @@ export default function Arbitrage() {
                     
                     avgPrice7d = top7Vol > 0 ? Math.round(top7TempSum / top7Vol) : null;
                     
-                    const top3 = sortedDays.slice(0, 3);
-                    const top3Vol = top3.reduce((sum, pt) => sum + pt.item_count, 0);
-                    recentAvgPrice = top3Vol > 0
-                      ? top3.reduce((sum, pt) => sum + (pt.avg_price * pt.item_count), 0) / top3Vol
-                      : null;
+
                   }
 
                   // 4w moving average calculation (always run this regardless of recent data)
@@ -314,11 +307,11 @@ export default function Arbitrage() {
               const bestSell = validSells.length > 0 ? validSells.reduce((prev, curr) => prev.sell_price_min < curr.sell_price_min ? prev : curr) : null;
               const bestBuy = validBuys.length > 0 ? validBuys.reduce((prev, curr) => prev.buy_price_max > curr.buy_price_max ? prev : curr) : null;
 
-              const estimatedActual = estimateActualTradingPrice(
-                bestBuy ? bestBuy.buy_price_max : null,
-                bestSell ? bestSell.sell_price_min : null,
-                recentAvgPrice
-              );
+              // const estimatedActual = estimateActualTradingPrice(
+              //   bestBuy ? bestBuy.buy_price_max : null,
+              //   bestSell ? bestSell.sell_price_min : null,
+              //   recentAvgPrice
+              // );
 
               // Format relative time helper
               const formatTimeAgo = (dateStr: string) => {

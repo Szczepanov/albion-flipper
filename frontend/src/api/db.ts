@@ -3,17 +3,17 @@ import { type PriceData, type HistoryData } from './albion';
 
 interface AlbionDB extends DBSchema {
   prices: {
-    key: string; // item_id (e.g. "T4_BAG")
+    key: string; // cache key (e.g. "T4_BAG::Caerleon|Black Market")
     value: {
-      item_id: string;
+      cache_key: string;
       timestamp: number;
       data: PriceData[];
     };
   };
   history: {
-    key: string; // item_id
+    key: string; // cache key (e.g. "T4_BAG::Black Market")
     value: {
-      item_id: string;
+      cache_key: string;
       timestamp: number;
       data: HistoryData[];
     };
@@ -21,7 +21,7 @@ interface AlbionDB extends DBSchema {
 }
 
 const DB_NAME = 'albion-flipper-db';
-const DB_VERSION = 2; // Bump version for new schema
+const DB_VERSION = 3;
 
 export async function initDB(): Promise<IDBPDatabase<AlbionDB>> {
   return openDB<AlbionDB>(DB_NAME, DB_VERSION, {
@@ -35,9 +35,9 @@ export async function initDB(): Promise<IDBPDatabase<AlbionDB>> {
   });
 }
 
-export async function getCachedPrice(itemId: string, ttlMs: number): Promise<PriceData[] | null> {
+export async function getCachedPrice(cacheKey: string, ttlMs: number): Promise<PriceData[] | null> {
   const db = await initDB();
-  const entry = await db.get('prices', itemId);
+  const entry = await db.get('prices', cacheKey);
   
   if (!entry) return null;
   if (Date.now() - entry.timestamp > ttlMs) return null;
@@ -45,18 +45,18 @@ export async function getCachedPrice(itemId: string, ttlMs: number): Promise<Pri
   return entry.data;
 }
 
-export async function setCachedPrice(itemId: string, data: PriceData[]) {
+export async function setCachedPrice(cacheKey: string, data: PriceData[]) {
   const db = await initDB();
   await db.put('prices', {
-    item_id: itemId,
+    cache_key: cacheKey,
     timestamp: Date.now(),
     data: data
   });
 }
 
-export async function getCachedHistory(itemId: string, ttlMs: number): Promise<HistoryData[] | null> {
+export async function getCachedHistory(cacheKey: string, ttlMs: number): Promise<HistoryData[] | null> {
   const db = await initDB();
-  const entry = await db.get('history', itemId);
+  const entry = await db.get('history', cacheKey);
   
   if (!entry) return null;
   if (Date.now() - entry.timestamp > ttlMs) return null;
@@ -64,10 +64,10 @@ export async function getCachedHistory(itemId: string, ttlMs: number): Promise<H
   return entry.data;
 }
 
-export async function setCachedHistory(itemId: string, data: HistoryData[]) {
+export async function setCachedHistory(cacheKey: string, data: HistoryData[]) {
   const db = await initDB();
   await db.put('history', {
-    item_id: itemId,
+    cache_key: cacheKey,
     timestamp: Date.now(),
     data: data
   });
@@ -77,4 +77,22 @@ export async function clearAllCache() {
   const db = await initDB();
   await db.clear('prices');
   await db.clear('history');
+}
+
+export async function clearItemCache(itemId: string) {
+  const db = await initDB();
+  const stores: Array<'prices' | 'history'> = ['prices', 'history'];
+
+  for (const storeName of stores) {
+    const tx = db.transaction(storeName, 'readwrite');
+    let cursor = await tx.store.openCursor();
+    while (cursor) {
+      const key = String(cursor.key);
+      if (key === itemId || key.startsWith(`${itemId}::`)) {
+        await cursor.delete();
+      }
+      cursor = await cursor.continue();
+    }
+    await tx.done;
+  }
 }
