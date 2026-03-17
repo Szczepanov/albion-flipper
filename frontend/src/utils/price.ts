@@ -32,9 +32,10 @@ export const estimateActualTradingPrice = (
     return { price: Math.round(clampedToBook), model: 'history-clamped' };
   }
 
-  // Fallback without recent history: use conservative mid-spread for very wide books, else slightly below ask.
+  // Fallback without recent history: 
+  // If the spread is very wide, mid-spread is a dangerous trap because usually items are only moving at the buy-order price.
   if (spreadPct >= 0.2) {
-    return { price: Math.round((buy + sell) / 2), model: 'mid-spread' };
+    return { price: buy, model: 'buy-side' };
   }
   return { price: Math.max(buy, sell - 1), model: 'sell-side' };
 };
