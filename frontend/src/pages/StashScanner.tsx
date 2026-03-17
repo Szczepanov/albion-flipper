@@ -23,6 +23,7 @@ const CATEGORIES = [
   // Refined Materials
   { id: 'REFINED',  label: 'Refined Mats',   searchStr: 'PLANKS|METALBAR|LEATHER|CLOTH|STONEBLOCK' },
 ];
+const CATEGORY_IDS = CATEGORIES.map(c => c.id);
 
 interface ItemEntry {
   id: string;
@@ -45,7 +46,7 @@ interface StashOpportunity {
 export default function StashScanner() {
   const [baseCity, setBaseCity] = useState('Lymhurst');
   const [selectedTiers, setSelectedTiers] = useState<Set<string>>(new Set(TIERS));
-  const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set(CATEGORIES.map(c => c.id)));
+  const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set(CATEGORY_IDS));
   const [minPremium, setMinPremium] = useState(20);
   const [minVolume, setMinVolume] = useState(10);
   
@@ -76,6 +77,17 @@ export default function StashScanner() {
     else next.add(c);
     setSelectedCats(next);
   };
+
+  const toggleAllTiers = () => {
+    setSelectedTiers(prev => (prev.size === TIERS.length ? new Set() : new Set(TIERS)));
+  };
+
+  const toggleAllCategories = () => {
+    setSelectedCats(prev => (prev.size === CATEGORY_IDS.length ? new Set() : new Set(CATEGORY_IDS)));
+  };
+
+  const areAllTiersSelected = selectedTiers.size === TIERS.length;
+  const areAllCategoriesSelected = selectedCats.size === CATEGORY_IDS.length;
 
   const runScanner = async () => {
     if (selectedTiers.size === 0 || selectedCats.size === 0) {
@@ -353,6 +365,21 @@ export default function StashScanner() {
                 {t}
               </button>
             ))}
+            <button
+              onClick={toggleAllTiers}
+              disabled={isScanning}
+              className="transition-all"
+              style={{
+                padding: '4px 10px',
+                borderRadius: '6px',
+                fontSize: '0.875rem',
+                fontWeight: 600,
+                backgroundColor: areAllTiersSelected ? 'var(--accent-secondary)' : 'rgba(255,255,255,0.05)',
+                color: areAllTiersSelected ? '#fff' : 'var(--text-muted)'
+              }}
+            >
+              All
+            </button>
           </div>
 
           <label className="block text-sm font-medium text-gray-400 mb-2">Target Categories</label>
@@ -375,6 +402,21 @@ export default function StashScanner() {
                 {c.label}
               </button>
             ))}
+            <button
+              onClick={toggleAllCategories}
+              disabled={isScanning}
+              className="transition-all"
+              style={{
+                padding: '4px 10px',
+                borderRadius: '6px',
+                fontSize: '0.875rem',
+                fontWeight: 600,
+                backgroundColor: areAllCategoriesSelected ? 'var(--accent-secondary)' : 'rgba(255,255,255,0.05)',
+                color: areAllCategoriesSelected ? '#fff' : 'var(--text-muted)'
+              }}
+            >
+              All
+            </button>
           </div>
 
           <label className="block text-sm font-medium text-gray-400 mb-2">Min. Premium (%) & Local Vol (24h)</label>
