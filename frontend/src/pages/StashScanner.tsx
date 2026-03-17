@@ -131,7 +131,7 @@ export default function StashScanner() {
       
       const [priceData, histData] = await Promise.all([
         fetchPrices(justIds, CITIES), // explicit fetch just for Royal Cities
-        fetchHistory(justIds, [baseCity]) // We only care about Local volume
+        fetchHistory(justIds) // Fetch for all cities to compute global anchor price
       ]);
 
       setScanProgress({ current: targetIds.length, total: targetIds.length });
@@ -143,12 +143,34 @@ export default function StashScanner() {
 
       for (const item of targetIds) {
         const itemPrices = priceData.filter(p => p.item_id === item.id);
-        const itemHist = histData.filter(h => h.item_id === item.id && h.location === baseCity);
+        const itemHistGlobal = histData.filter(h => h.item_id === item.id);
+        const itemHistLocal = itemHistGlobal.filter(h => h.location === baseCity);
 
         if (itemPrices.length === 0) continue;
 
+        // Establish a global anchor price from 3-4 week old history to prevent troll listings
+        let anchorVol = 0;
+        let anchorSum = 0;
+        itemHistGlobal.forEach(h => {
+          if (h.data) {
+            h.data.forEach(pt => {
+              const diffd = (now - new Date(pt.timestamp).getTime()) / dayMs;
+              if (diffd >= 21 && diffd <= 28.5) {
+                anchorVol += pt.item_count;
+                anchorSum += (pt.avg_price * pt.item_count);
+              }
+            });
+          }
+        });
+        const anchorPrice = anchorVol > 0 ? (anchorSum / anchorVol) : null;
+        
+        const isReasonable = (price: number) => {
+          if (!anchorPrice) return true;
+          return price <= anchorPrice * 3; // Block outliers >3x historical avg
+        };
+
         // Find local sell price
-        const localPrices = itemPrices.filter(p => p.city === baseCity && p.sell_price_min > 0);
+        const localPrices = itemPrices.filter(p => p.city === baseCity && p.sell_price_min > 0 && isReasonable(p.sell_price_min));
         if (localPrices.length === 0) continue;
         const localSellPrice = Math.min(...localPrices.map(p => p.sell_price_min));
 
@@ -156,7 +178,7 @@ export default function StashScanner() {
         let otherCitiesSells: number[] = [];
         for (const city of CITIES) {
           if (city === baseCity) continue;
-          const cityPrices = itemPrices.filter(p => p.city === city && p.sell_price_min > 0);
+          const cityPrices = itemPrices.filter(p => p.city === city && p.sell_price_min > 0 && isReasonable(p.sell_price_min));
           if (cityPrices.length > 0) {
             otherCitiesSells.push(Math.min(...cityPrices.map(p => p.sell_price_min)));
           }
@@ -175,9 +197,9 @@ export default function StashScanner() {
           let ov = 0;
           let ops = 0;
           
-          if (itemHist.length > 0) {
+          if (itemHistLocal.length > 0) {
             const dailyTotals = new Map<string, { count: number; value: number }>();
-            itemHist.forEach(h => {
+            itemHistLocal.forEach(h => {
               if (h.data) {
                 h.data.forEach(pt => {
                   const dayKey = pt.timestamp.split('T')[0];
