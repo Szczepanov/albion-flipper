@@ -101,6 +101,17 @@ const estimateActualTradingPrice = (
   return { price: Math.max(buy, sell - 1), model: 'sell-side' };
 };
 
+const ACTUAL_PRICE_LABELS: Record<TradeOpportunity['actualPriceModel'], string> = {
+  'buy-side': 'Buy-Side Fills',
+  'mid-spread': 'Mid Spread',
+  'history-clamped': 'History Anchored',
+  'sell-side': 'Sell-Side',
+};
+
+const formatCompactSilver = (n: number) => (
+  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(0)}k` : n.toString()
+);
+
 export default function Scanner() {
   const [baseCity, setBaseCity] = useState('Lymhurst');
   const [selectedTiers, setSelectedTiers] = useState<Set<string>>(new Set(TIERS));
@@ -317,16 +328,15 @@ export default function Scanner() {
           if (estimatedActual.price === null) continue;
           const bestDestPrice = estimatedActual.price;
 
-          const buyFee = Math.ceil(bestSourcePrice * 0.025);
           const sellFee = Math.ceil(bestDestPrice * 0.025);
           const salesTax = Math.ceil(bestDestPrice * 0.04); // 4% Premium Tax
           
-          const totalCostPerItem = bestSourcePrice + buyFee;
+          const totalCostPerItem = bestSourcePrice;
           const totalRevenuePerItem = bestDestPrice - sellFee - salesTax;
           
           const grossProfit = totalRevenuePerItem - totalCostPerItem;
           const jumps = CITY_DISTANCES[baseCity]?.[destCity] || 0;
-          // ROI is purely gross margin on invested silver (cost + buy fee)
+          // ROI is purely gross margin on invested silver
           const roi = (grossProfit / totalCostPerItem) * 100;
 
           if (roi >= minProfit) {
@@ -377,9 +387,8 @@ export default function Scanner() {
         // Already sorted by ROI desc; allocate budget greedily
         let remaining = budget;
         group.forEach(opp => {
-          // Compute exact cost required to buy one item (including buy order fee)
-          const buyFee = Math.ceil(opp.buyAtPrice * 0.025);
-          const totalCostPerItem = opp.buyAtPrice + buyFee;
+          // Compute exact cost required to buy one item
+          const totalCostPerItem = opp.buyAtPrice;
           
           const maxCanBuy = totalCostPerItem > 0 ? Math.floor(remaining / totalCostPerItem) : 0;
           const mQty = Math.min(opp.recommendedQty, maxCanBuy);
@@ -610,39 +619,43 @@ export default function Scanner() {
 
           <div className="flex flex-col gap-6">
             {routeStats.map(({ destCity, items, jumps, tripMinutes, totalRouteProfit, silverPerHour }) => {
-              const fmtSilver = (n: number) => n >= 1_000_000 ? (n/1_000_000).toFixed(1)+'M' : n >= 1_000 ? (n/1_000).toFixed(0)+'k' : n.toString();
               return (
               <div key={destCity} className="glass-panel fade-in overflow-hidden">
                 <div className="bg-gradient-to-r from-[rgba(255,255,255,0.05)] to-transparent p-4 border-b border-gray-800 flex justify-between items-center flex-wrap gap-4">
-                  <div className="flex flex-col">
+                  <div className="flex flex-col gap-3">
                     <h3 className="font-bold text-lg text-white flex items-center gap-2">
                       <span className="text-blue-400">{baseCity}</span>
-                      <span className="text-gray-500">➔</span>
+                      <span className="text-gray-500">{'->'}</span>
                       <span className="text-purple-400">{destCity}</span>
                     </h3>
-                    <div className="text-xs text-gray-400 mt-1 flex flex-wrap items-center gap-3">
-                      <span className="flex items-center gap-1">
-                        <MapPin size={11} />{jumps} jump{jumps !== 1 ? 's' : ''} (~{tripMinutes} min)
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="px-2.5 py-1.5 rounded-full bg-black/25 border border-white/10 text-gray-300 flex items-center gap-1">
+                        <MapPin size={11} />
+                        {jumps} jump{jumps !== 1 ? 's' : ''} ({tripMinutes}m)
                       </span>
-                      <span className="text-emerald-400 font-semibold">+{fmtSilver(totalRouteProfit)} total</span>
-                      <span className="text-yellow-400/80">{fmtSilver(silverPerHour)}/hr</span>
+                      <span className="px-2.5 py-1.5 rounded-full bg-black/25 border border-white/10 text-gray-300">
+                        {items.length} items
+                      </span>
+                      <span className="px-2.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
+                        +{formatCompactSilver(totalRouteProfit)} route profit
+                      </span>
+                      <span className="px-2.5 py-1.5 rounded-full bg-yellow-500/10 border border-yellow-500/20 text-yellow-300">
+                        {formatCompactSilver(silverPerHour)}/h
+                      </span>
                     </div>
                   </div>
-                  <div className="text-sm text-gray-400 bg-black/30 px-3 py-1 rounded-full">
-                    {items.length} viable items
-                  </div>
                 </div>
-
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-gray-800 text-sm text-gray-400 uppercase tracking-wider">
                         <th className="p-4 font-medium">Item</th>
                         <th className="p-4 font-medium text-right">Buy @ Source</th>
-                        <th className="p-4 font-medium text-right">Sell @ Dest</th>
+                        <th className="p-4 font-medium text-right">Est. Exit @ Dest</th>
                         <th className="p-4 font-medium text-right">Gross / ROI</th>
                         <th className="p-4 font-medium text-center">Qty (24h vol)</th>
                         <th className="p-4 font-medium text-right">Total Profit</th>
+                        <th className="p-4 font-medium text-center"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -650,45 +663,51 @@ export default function Scanner() {
                         <tr key={idx} className="border-b border-gray-800/50 hover:bg-[rgba(255,255,255,0.02)] transition-colors">
                           <td className="p-4">
                             <div className="flex items-center gap-3">
-                              <img 
-                                src={`https://render.albiononline.com/v1/item/${opp.itemId}.png`} 
-                                alt={opp.name}
-                                className="w-10 h-10 object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
-                                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                              />
-                              <div className="flex flex-col items-start">
+                              <a
+                                href={`/?item=${opp.itemId}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`Open ${opp.name} in Arbitrage`}
+                                className="rounded-md transition-transform hover:scale-[1.03] focus:outline-none focus:ring-2 focus:ring-blue-400/60"
+                              >
+                                <img
+                                  src={`https://render.albiononline.com/v1/item/${opp.itemId}.png`}
+                                  alt={opp.name}
+                                  className="w-14 h-14 object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.55)] rounded-md bg-black/20 border border-white/10"
+                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                />
+                              </a>
+                              <div className="flex flex-col items-start gap-1">
                                 <a
                                   href={`/?item=${opp.itemId}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="font-semibold text-gray-200 hover:text-blue-400 transition-colors hover:underline underline-offset-2 cursor-pointer"
+                                  className="font-semibold text-white visited:text-white hover:text-emerald-300 transition-colors underline decoration-white/40 hover:decoration-emerald-300 underline-offset-2 cursor-pointer"
                                   title={`Open ${opp.name} in Arbitrage`}
                                 >{opp.name}</a>
+                                <div className="text-xs text-gray-500">
+                                  Avg 4w: <span className="text-gray-300">{opp.avgPrice4w ? opp.avgPrice4w.toLocaleString() : '-'}</span>
+                                </div>
                                 {opp.priceSpikePct !== null && opp.priceSpikePct >= 20 && (
                                   <div className="flex items-center gap-1 text-[10px] font-bold text-orange-400 bg-orange-400/10 border border-orange-400/20 px-1.5 py-0.5 rounded shadow-[0_0_8px_rgba(251,146,60,0.15)] mt-1 tracking-wide uppercase">
                                     <TrendingUp size={10} />
                                     Spike +{opp.priceSpikePct}% vs Avg
                                   </div>
                                 )}
-                                <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
-                                  Avg 4w: <span className="text-gray-300">{opp.avgPrice4w ? opp.avgPrice4w.toLocaleString() : '-'}</span>
-                                </div>
                               </div>
                             </div>
                           </td>
                           <td className="p-4 text-right">
                             <div className="font-medium text-red-400">-{opp.buyAtPrice.toLocaleString()}</div>
-                            <div className="text-xs text-gray-500 mt-0.5 whitespace-nowrap">
-                              +{Math.ceil(opp.buyAtPrice * 0.025).toLocaleString()} buy fee
-                            </div>
                           </td>
                           <td className="p-4 text-right">
                             <div className="font-medium text-green-400">+{opp.sellAtPrice.toLocaleString()}</div>
-                            <div className="text-xs text-gray-500 mt-0.5 whitespace-nowrap">
-                              est actual ({opp.actualPriceModel}), -{Math.ceil(opp.sellAtPrice * 0.025).toLocaleString()} fee,{' '}
-                              -{Math.ceil(opp.sellAtPrice * 0.04).toLocaleString()} tax
+                            <div className="text-[10px] mt-1 flex justify-end">
+                              <span className="inline-block bg-blue-500/15 text-blue-300 border border-blue-500/30 px-1.5 py-0.5 rounded" title={`Model: ${ACTUAL_PRICE_LABELS[opp.actualPriceModel]}`}>
+                                {ACTUAL_PRICE_LABELS[opp.actualPriceModel]}
+                              </span>
                             </div>
-                            <div className="text-[10px] text-gray-600 mt-0.5 whitespace-nowrap">
+                            <div className="text-[10px] text-gray-500 mt-0.5 whitespace-nowrap">
                               book B:{opp.destBestBuy ? opp.destBestBuy.toLocaleString() : '-'} / S:{opp.destBestSell ? opp.destBestSell.toLocaleString() : '-'}
                             </div>
                           </td>
@@ -704,7 +723,7 @@ export default function Scanner() {
                           </td>
                           <td className="p-4">
                             <div className="flex flex-col items-center">
-                              <span className="font-bold text-white text-base">×{opp.manifestQty.toLocaleString()}</span>
+                              <span className="font-bold text-white text-base">x{opp.manifestQty.toLocaleString()}</span>
                               <span className="text-[10px] text-gray-500 mt-0.5">{opp.destVol24h.toLocaleString()} 24h vol</span>
                               <span className="text-[10px] text-gray-600">{opp.destVol7d.toLocaleString()} 7d</span>
                             </div>
