@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Search, MapPin, Loader2, DollarSign, Package, AlertCircle, TrendingUp, X } from 'lucide-react';
 import { fetchPrices, fetchHistory } from '../api/albion';
+import { estimateActualTradingPrice, ACTUAL_PRICE_LABELS, type ActualPriceModel } from '../utils/price';
 
 // Royal Cities only — no Caerleon (Red Zone) for safe trading
 const CITIES = ['Martlock', 'Thetford', 'Fort Sterling', 'Lymhurst', 'Bridgewatch'];
@@ -48,7 +49,7 @@ interface TradeOpportunity {
   estimatedActualPrice: number;
   destBestBuy: number | null;
   destBestSell: number | null;
-  actualPriceModel: 'buy-side' | 'mid-spread' | 'history-clamped' | 'sell-side';
+  actualPriceModel: ActualPriceModel;
   grossProfit: number;
   roi: number;
   jumps: number;
@@ -62,51 +63,6 @@ interface TradeOpportunity {
   totalProfit: number;
 }
 
-const estimateActualTradingPrice = (
-  bestBuy: number | null,
-  bestSell: number | null,
-  recentAvg: number | null
-): { price: number | null; model: TradeOpportunity['actualPriceModel'] } => {
-  if (!bestBuy && !bestSell) return { price: null, model: 'mid-spread' };
-  if (bestBuy && !bestSell) return { price: bestBuy, model: 'buy-side' };
-  if (!bestBuy && bestSell) return { price: bestSell, model: 'sell-side' };
-
-  const buy = bestBuy!;
-  const sell = bestSell!;
-  const spread = sell - buy;
-  const spreadPct = spread > 0 ? spread / Math.max(buy, 1) : 0;
-
-  if (recentAvg !== null && recentAvg > 0) {
-    const clampedToBook = Math.max(buy, Math.min(sell, recentAvg));
-
-    // If history sits very close to best buy while spread is wide, assume mostly buy-order fills.
-    const closeToBuy = Math.abs(clampedToBook - buy) / Math.max(buy, 1) <= 0.05;
-    if (spreadPct >= 0.2 && closeToBuy) {
-      return { price: buy, model: 'buy-side' };
-    }
-
-    // If history is close to best sell and spread is tight, treat as sell-side execution.
-    const closeToSell = Math.abs(sell - clampedToBook) / Math.max(sell, 1) <= 0.03;
-    if (spreadPct <= 0.08 && closeToSell) {
-      return { price: sell, model: 'sell-side' };
-    }
-
-    return { price: Math.round(clampedToBook), model: 'history-clamped' };
-  }
-
-  // Fallback without recent history: use conservative mid-spread for very wide books, else slightly below ask.
-  if (spreadPct >= 0.2) {
-    return { price: Math.round((buy + sell) / 2), model: 'mid-spread' };
-  }
-  return { price: Math.max(buy, sell - 1), model: 'sell-side' };
-};
-
-const ACTUAL_PRICE_LABELS: Record<TradeOpportunity['actualPriceModel'], string> = {
-  'buy-side': 'Buy-Side Fills',
-  'mid-spread': 'Mid Spread',
-  'history-clamped': 'History Anchored',
-  'sell-side': 'Sell-Side',
-};
 
 const formatCompactSilver = (n: number) => (
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(0)}k` : n.toString()

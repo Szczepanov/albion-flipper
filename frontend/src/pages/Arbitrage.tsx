@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fetchPrices, fetchHistory, type PriceData, type HistoryData } from '../api/albion';
+import { estimateActualTradingPrice, ACTUAL_PRICE_LABELS } from '../utils/price';
 import { RefreshCcw, Search, RotateCw } from 'lucide-react';
 
 interface ItemEntry {
@@ -216,6 +217,7 @@ export default function Arbitrage() {
               let vol4w = 0;
               let oldVolume = 0;
               let oldPriceSum = 0;
+              let recentAvgPrice: number | null = null;
 
               if (cityHistory.length > 0) {
                 const dailyTotals = new Map<string, { count: number; value: number }>();
@@ -250,6 +252,12 @@ export default function Arbitrage() {
                     const top7 = sortedDays.slice(0, 7);
                     vol7d = Math.round(top7.reduce((sum, pt) => sum + pt.item_count, 0) / top7.length);
                     
+                    const top3 = sortedDays.slice(0, 3);
+                    const top3Vol = top3.reduce((sum, pt) => sum + pt.item_count, 0);
+                    recentAvgPrice = top3Vol > 0
+                      ? top3.reduce((sum, pt) => sum + (pt.avg_price * pt.item_count), 0) / top3Vol
+                      : null;
+
                     // 4w moving average calculation
                     sortedDays.forEach(pt => {
                       const diffd = (now - pt.timestamp) / dayMs;
@@ -281,6 +289,12 @@ export default function Arbitrage() {
 
               const bestSell = validSells.length > 0 ? validSells.reduce((prev, curr) => prev.sell_price_min < curr.sell_price_min ? prev : curr) : null;
               const bestBuy = validBuys.length > 0 ? validBuys.reduce((prev, curr) => prev.buy_price_max > curr.buy_price_max ? prev : curr) : null;
+
+              const estimatedActual = estimateActualTradingPrice(
+                bestBuy ? bestBuy.buy_price_max : null,
+                bestSell ? bestSell.sell_price_min : null,
+                recentAvgPrice
+              );
 
               // Format relative time helper
               const formatTimeAgo = (dateStr: string) => {
@@ -326,6 +340,20 @@ export default function Arbitrage() {
                   </div>
 
                   <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-light)' }}>
+                    <div className="flex justify-between items-center mb-2">
+                      <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Est. Actual Price</span>
+                      <div className="flex flex-col items-end">
+                        <span style={{ fontWeight: 600, color: 'var(--accent-primary)', fontSize: '0.9rem' }}>
+                          {estimatedActual.price ? `${estimatedActual.price.toLocaleString()}` : 'No Data'}
+                        </span>
+                        {estimatedActual.price && (
+                          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                            Model: {ACTUAL_PRICE_LABELS[estimatedActual.model]}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
                     <div className="flex justify-between items-center mb-2">
                       <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Avg Price (~4w ago)</span>
                       <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.875rem' }}>
