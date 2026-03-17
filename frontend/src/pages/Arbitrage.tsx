@@ -100,8 +100,13 @@ export default function Arbitrage() {
       setIsRefreshing(false);
     }
   };
+  const searchWords = searchTerm.toLowerCase().replace(/['\-]/g, '').split(/\s+/).filter(Boolean);
+
   const filteredItems = searchTerm.length > 2 
-    ? itemsList.filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, 10)
+    ? itemsList.filter(item => {
+        const normalizedItemName = item.name.toLowerCase().replace(/['\-]/g, '');
+        return searchWords.every(word => normalizedItemName.includes(word));
+      }).slice(0, 10)
     : [];
 
   return (
